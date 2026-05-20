@@ -55,18 +55,18 @@ Node.js 20 · TypeScript (strict) · PostgreSQL 17 + pgvector · MCP TypeScript 
 
 ## Inception Sprint — Task Board
 
-| # | Task | Owner | ID |
-|---|---|---|---|
-| 1 | Codebase strategy ADR — fork from opensquad-mcp-server vs clean scaffold | Silas | #1282 |
-| 2 | Create GitHub repo input-output-lab/openhiveos with branch protection + CI | Cooper | #1283 |
-| 3 | Scaffold project structure — package.json, tsconfig, Docker Compose base | Murphy | #1284 |
-| 4 | Write public README — brand story, product positioning, quick-start | Clarence | #1285 |
-| 5 | Port OS Primitives tool set from opensquad-mcp-server | Murphy | #1286 |
-| 6 | squad.manifest.json schema — design, validate, document (ARCH-006 PROD-1) | Murphy | #1287 |
-| 7 | squad_config table + boot fingerprint guard + GET /health (ARCH-006 SEC-10) | Murphy | #1288 |
-| 8 | Docker Compose Squad deployment artifact — production-ready | Cooper | #1289 |
-| 9 | DNS setup — openhiveos.com and openhiveos.io, holding page | Cooper | #1290 |
-| 10 | File ARCH-002-openhiveos — founding architectural decisions | Silas | #1291 |
+| # | Task | Owner | ID | Status |
+|---|---|---|---|---|
+| 1 | Codebase strategy ADR — fork from opensquad-mcp-server vs clean scaffold | Silas | #1282 | ✅ Done — ARCH-007 filed 2026-05-20 |
+| 2 | Create GitHub repo input-output-Lab/openhiveos with branch protection + CI | Cooper | #1283 | ✅ Done — repo live, SEC-14/SEC-15 wired 2026-05-20 |
+| 3 | Scaffold project structure — package.json, tsconfig, Docker Compose base | Murphy | #1284 | ✅ Done — scaffold merged 2026-05-20 |
+| 4 | Write public README — brand story, product positioning, quick-start | Clarence | #1285 | ⏳ Pending |
+| 5 | Port OS Primitives tool set from opensquad-mcp-server | Murphy | #1286 | ⏳ Pending — 8 PRs, one per primitive |
+| 6 | squad.manifest.json schema — design, validate, document (ARCH-006 PROD-1) | Murphy | #1287 | ⏳ Pending |
+| 7 | squad_config table + boot fingerprint guard + GET /health (ARCH-006 SEC-10) | Murphy | #1288 | ⏳ Pending |
+| 8 | Docker Compose Squad deployment artifact — production-ready | Cooper | #1289 | ⏳ Pending |
+| 9 | DNS setup — openhiveos.com and openhiveos.io, holding page | Cooper | #1290 | ⏳ Pending |
+| 10 | File ARCH-002-openhiveos — founding architectural decisions | Silas | #1291 | ⏳ Pending |
 
 ## Open Questions (Founder Seat)
 
@@ -83,6 +83,6 @@ These must be answered before Sprint 2 planning. Both are on the L10 agenda.
 - **Slug:** `openhiveos`
 - **Type:** portfolio
 - **Lead:** elizabeth
-- **GitHub:** https://github.com/input-output-lab/openhiveos
+- **GitHub:** https://github.com/input-output-Lab/openhiveos
 
 > Note: Portfolio project type blocks direct sprint advancement — sprints sync via OpenBridge. Task tracking (TODO → WIP → REVIEW → DONE) works normally.
