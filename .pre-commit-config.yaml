@@ -15,6 +15,6 @@ repos:
       - id: gitleaks
         name: Detect secrets (gitleaks)
         description: Prevent secrets from being committed
-        entry: gitleaks protect --staged --redact --verbose
+        entry: gitleaks protect --staged --config gitleaks.toml --redact --verbose
         language: golang
         pass_filenames: false

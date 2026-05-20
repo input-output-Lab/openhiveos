@@ -10,13 +10,18 @@ import { manifest } from './squad/manifest.js'
 // Exposes GET /health for Docker health checks and external monitoring.
 //
 // Port: HEALTH_PORT env var (default 3000)
+//
+// S2-08 (ARCH-008 addendum): the {agents} field was stripped from this
+// response. Squad composition is internal information — exposing agent slugs
+// on an unauthenticated endpoint is a reconnaissance vector if HEALTH_PORT
+// is ever published externally. The health probe needs {status} and {db}
+// only. Locksmith reviewed and accepted this resolution (S2-02).
 // ---------------------------------------------------------------------------
 
 interface HealthPayload {
   status: 'ok' | 'degraded'
   version: string
   squad: string
-  agents: string[]
   db: 'connected' | 'error'
   error?: string
 }
@@ -30,7 +35,6 @@ export function startHealthServer(): void {
           status: 'ok',
           version: '0.1.0',
           squad: manifest.squad,
-          agents: manifest.agents.map((a) => a.slug),
           db: 'connected',
         }
         res.writeHead(200, { 'Content-Type': 'application/json' })
@@ -41,7 +45,6 @@ export function startHealthServer(): void {
           status: 'degraded',
           version: '0.1.0',
           squad: manifest.squad,
-          agents: manifest.agents.map((a) => a.slug),
           db: 'error',
           error: err instanceof Error ? err.message : 'unknown error',
         }

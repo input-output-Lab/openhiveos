@@ -24,5 +24,8 @@ export async function connectDb(): Promise<void> {
 }
 
 pool.on('error', (err) => {
-  console.error('[db] Unexpected pool error:', err)
+  // Log message only — never the full error object. pg PoolClient error events
+  // can include connection string details in some error paths (M-001, S2-03 STRIDE).
+  const message = err instanceof Error ? err.message : 'unknown pool error'
+  console.error('[db] Unexpected pool error:', message)
 })

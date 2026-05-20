@@ -8,7 +8,7 @@ tags:
 
 # OpenHiveOS — Documentation Index
 
-This index covers all documents in the OpenHiveOS docs folder. Every architectural decision from the opensquad-mcp-server ARCH-001 through ARCH-006 reviews is inherited by OpenHiveOS and filed here as the canonical record.
+This index covers all documents in the OpenHiveOS docs folder. Every architectural decision from the OpenSquad MCP Server ARCH-001 through ARCH-006 reviews is inherited by OpenHiveOS and filed here as the canonical record.
 
 ---
 
@@ -30,7 +30,8 @@ This index covers all documents in the OpenHiveOS docs folder. Every architectur
 | [ARCH-004-agent-os-consolidation.md](ARCH-004-agent-os-consolidation.md) | Three consolidation decisions: shared-DB contract with openBridge (1A), build-time dashboard embed into squad-api (3A), Docker Compose productization target (2A) |
 | [ARCH-005-agent-os-canonical-architecture.md](ARCH-005-agent-os-canonical-architecture.md) | TypeScript module decomposition (`src/primitives/` + `src/utilities/`) selected immediately; two-service MCP split declared as Sprint 4+ architectural target |
 | [ARCH-006-agent-os-product-boundary.md](ARCH-006-agent-os-product-boundary.md) | One-OS-Per-Squad (federated deployment) is the product definition — unanimous 7/7 across all seats; Squad is the atomic deployment unit |
-| [ARCH-007-openhiveos-codebase-strategy.md](ARCH-007-openhiveos-codebase-strategy.md) | Option C (Selective Extraction) chosen unanimous 8/8 — fresh scaffold + per-primitive extraction from opensquad-mcp-server with SEC review; Option B blocked by Locksmith (OWASP A02:2021); SEC-14 through SEC-20 binding conditions established |
+| [ARCH-007-openhiveos-codebase-strategy.md](ARCH-007-openhiveos-codebase-strategy.md) | Option C (Selective Extraction) chosen unanimous 8/8 — fresh scaffold + per-primitive extraction from OpenSquad MCP Server with SEC review; Option B blocked by Locksmith (OWASP A02:2021); SEC-14 through SEC-20 binding conditions established |
+| [ARCH-009-sop-seeding-operator-onboarding.md](ARCH-009-sop-seeding-operator-onboarding.md) | SOP seeding via `seeds/sops/` `.md` files ingested at boot; two-namespace model (core/operator); agentic-first authoring standard; operator onboarding UX; 4/4 unanimous. Deferred to Onboarding Sprint. |
 
 ---
 
