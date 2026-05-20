@@ -15,6 +15,7 @@ export type ThoughtIntensity = 'signal' | 'caution' | 'block'
 
 export interface Memory {
   id: number
+  agent_slug: string
   task_id: number | null
   content: string
   metadata: Record<string, unknown>
@@ -44,7 +45,6 @@ export interface CounterThought {
 
 export interface AgentThought {
   id: number
-  agent_name: AgentName
   agent_slug: string
   session_id: string | null
   task_id: number | null
@@ -66,8 +66,7 @@ export interface AgentThought {
 }
 
 export interface DispositionProfile {
-  id: number
-  agent_name: AgentName
+  agent_slug: string
   assertiveness: number
   energy: number
   patience: number
