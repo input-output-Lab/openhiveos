@@ -75,3 +75,64 @@ export interface DispositionProfile {
   updated_at: Date
   updated_by: string | null
 }
+
+// ---------------------------------------------------------------------------
+// Coordination Utility types (introduced in migration 002)
+// ---------------------------------------------------------------------------
+
+export type ProjectStatus = 'active' | 'archived'
+
+export type TaskStatus = 'todo' | 'wip' | 'review' | 'done' | 'rework'
+
+export interface Project {
+  id: number
+  slug: string
+  name: string
+  description: string | null
+  status: ProjectStatus
+  owner_agent_slug: string
+  created_at: Date
+  updated_at: Date
+}
+
+export interface Task {
+  id: number
+  project_id: number
+  title: string
+  description: string | null
+  status: TaskStatus
+  assignee_agent_slug: string | null
+  github_pr_url: string | null
+  notes: string | null
+  created_at: Date
+  updated_at: Date
+}
+
+export interface Sprint {
+  id: number
+  project_id: number
+  sprint_number: number
+  sprint_goal: string | null
+  started_at: Date
+  created_at: Date
+}
+
+export interface TaskSummary {
+  id: number
+  title: string
+  status: TaskStatus
+  assignee_agent_slug: string | null
+  github_pr_url: string | null
+  notes: string | null
+  created_at: Date
+  updated_at: Date
+}
+
+export interface ProjectBoard extends Project {
+  todo_count: number
+  wip_count: number
+  review_count: number
+  done_count: number
+  rework_count: number
+  tasks: TaskSummary[]
+}

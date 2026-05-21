@@ -9,7 +9,7 @@ adr: ARCH-006
 related: ARCH-001, ARCH-002, ARCH-003, ARCH-004, ARCH-005
 tags:
   - type/adr
-  - project/opensquad
+  - project/openhiveos
   - domain/architecture
   - domain/product
   - domain/devops
@@ -19,7 +19,7 @@ review_date: 2026-08-20
 # ARCH-006 — Agent OS Product Boundary: Squad, Integration, and Deployment Model
 
 **Date:** 2026-05-20
-**Project:** opensquad-mcp-server
+**Project:** OpenHiveOS
 **Status:** Decided
 **Decision Owner:** Silas
 **Approved By:** Elizabeth

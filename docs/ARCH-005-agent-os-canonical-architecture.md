@@ -7,7 +7,7 @@ approved_by: Elizabeth
 filed_by: Clarence
 tags:
   - type/adr
-  - project/opensquad
+  - project/openhiveos
   - domain/architecture
   - domain/backend
   - domain/devops

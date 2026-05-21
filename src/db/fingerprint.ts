@@ -13,6 +13,11 @@ import { pool } from './client.js'
 
 const REQUIRED_TABLES = ['agents', 'sops', 'memories', 'thoughts', 'dispositions'] as const
 
+// Coordination Utility tables — added by migration 002_coordination_utilities.sql
+const COORDINATION_TABLES = ['projects', 'tasks', 'sprints'] as const
+
+const ALL_REQUIRED_TABLES = [...REQUIRED_TABLES, ...COORDINATION_TABLES]
+
 export async function checkFingerprint(): Promise<void> {
   // 1. pgvector
   const extResult = await pool.query<{ exists: boolean }>(
@@ -33,15 +38,24 @@ export async function checkFingerprint(): Promise<void> {
      FROM pg_tables
      WHERE schemaname = 'public'
        AND tablename = ANY($1::text[])`,
-    [REQUIRED_TABLES],
+    [ALL_REQUIRED_TABLES],
   )
 
   const found = new Set(tableResult.rows.map((r) => r.tablename))
-  const missing = REQUIRED_TABLES.filter((t) => !found.has(t))
 
-  if (missing.length > 0) {
+  // Check OS Primitive tables (migration 001)
+  const missingPrimitives = REQUIRED_TABLES.filter((t) => !found.has(t))
+  if (missingPrimitives.length > 0) {
     throw new Error(
-      `[fingerprint] Missing tables: ${missing.join(', ')}. Run migrations/001_init.sql first.`,
+      `[fingerprint] Missing OS Primitive tables: ${missingPrimitives.join(', ')}. Run migrations/001_init.sql first.`,
+    )
+  }
+
+  // Check Coordination Utility tables (migration 002)
+  const missingCoordination = COORDINATION_TABLES.filter((t) => !found.has(t))
+  if (missingCoordination.length > 0) {
+    throw new Error(
+      `[fingerprint] Missing Coordination Utility tables: ${missingCoordination.join(', ')}. Run migrations/002_coordination_utilities.sql.`,
     )
   }
 

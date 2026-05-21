@@ -1,6 +1,6 @@
-# CI — Lint & Type-check
+# CI — Lint & Type-check + Migration validation
 # Runs on every push and PR targeting main.
-# Both jobs must pass before merge is permitted (SEC-14 required status checks).
+# All jobs must pass before merge is permitted (SEC-14 required status checks).
 
 name: CI
 
@@ -35,3 +35,71 @@ jobs:
 
       - name: Lint
         run: npm run lint
+
+  migration-validation:
+    name: Migration validation
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_DB: openhiveos_ci
+          POSTGRES_USER: openhiveos_ci
+          POSTGRES_PASSWORD: ci_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      PGHOST: localhost
+      PGPORT: 5432
+      PGDATABASE: openhiveos_ci
+      PGUSER: openhiveos_ci
+      PGPASSWORD: ci_password
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Apply migration 001 — OS Primitives
+        run: psql -f migrations/001_init.sql
+
+      - name: Apply migration 002 — Coordination Utilities
+        run: psql -f migrations/002_coordination_utilities.sql
+
+      - name: Verify schema — all 8 tables present
+        run: |
+          MISSING=$(psql -t -A -c "
+            SELECT string_agg(t, ', ' ORDER BY t)
+            FROM unnest(ARRAY[
+              'agents','sops','memories','thoughts','dispositions',
+              'projects','tasks','sprints'
+            ]) AS t
+            WHERE t NOT IN (
+              SELECT tablename FROM pg_tables WHERE schemaname = 'public'
+            )
+          ")
+          if [ -n "$MISSING" ]; then
+            echo "::error::Migration validation failed. Missing tables: $MISSING"
+            exit 1
+          fi
+          echo "Schema OK — all 8 required tables present"
+
+      - name: Verify deferred FKs — memories and thoughts wired to tasks
+        run: |
+          MISSING_FKS=$(psql -t -A -c "
+            SELECT string_agg(c, ', ' ORDER BY c)
+            FROM unnest(ARRAY['fk_memories_task_id','fk_thoughts_task_id']) AS c
+            WHERE c NOT IN (
+              SELECT constraint_name
+              FROM information_schema.table_constraints
+              WHERE constraint_type = 'FOREIGN KEY'
+            )
+          ")
+          if [ -n "$MISSING_FKS" ]; then
+            echo "::error::FK validation failed. Missing constraints: $MISSING_FKS"
+            exit 1
+          fi
+          echo "FK constraints OK — fk_memories_task_id and fk_thoughts_task_id active"
