@@ -3,7 +3,7 @@
 **Decision date:** 2026-04-24  
 **Status:** Active  
 **Authors:** Murphy (design), Silas (schema review), Locksmith (security review)  
-**Last Updated:** 2026-04-27
+**Last Updated:** 2026-05-21 (C13 — script paths updated to src/scripts/; Ethos Seal prerequisite added)
 
 ---
 
@@ -141,13 +141,13 @@ The `agents` table (migration `009_agents_table.sql`) is the backing store:
 - Rotation is zero-downtime: old tokens remain valid for 24 hours during the handover window.
 
 ### Negative / constraints
-- Every new agent must be provisioned via `scripts/provision-agent-token.ts` before they can write to the MCP server. Skipping this step causes a 401 on all write calls.
+- Every new agent must be provisioned via `src/scripts/provision-agent-token.ts` before they can write to the MCP server. Skipping this step causes a 401 on all write calls.
+- The **Ethos Seal must be initialised** (`src/scripts/one-init.ts`) before provisioning runs. The provision scripts gate on the seal's presence (ARCH-013).
 - If an agent's token is lost before being saved to the vault, the token must be rotated — there is no retrieval mechanism.
 - Each VS Code context must export the correct `MCP_AUTH_TOKEN_<SLUG>` env var. A wrong or missing var produces a silent 401 in VS Code (no visible error in the Copilot Chat UI).
 
 ### Known limitations
 - `expires_at` column exists in the schema but the auth middleware does not check it. Tokens do not expire automatically. Rotation is the only mechanism to invalidate a primary token (short of `active = FALSE`). Tracked as tech debt.
-- No `--revoke` flag exists on the provision script. Confirmed-compromise recovery requires a 3-step manual sequence. Tracked as tech debt.
 
 ---
 
@@ -179,9 +179,10 @@ Phase 4 is irreversible. It must not be executed until Phase 3 has been stable i
 
 ## References
 
-- `src/server.ts` — `parseBearer()`, `verifyHash()`, auth middleware (lines 36–143)
-- `migrations/009_agents_table.sql` — agents table DDL
-- `scripts/provision-agent-token.ts` — token provisioning and rotation
-- `docs/07-token-provisioning.md` — operator SOP for token lifecycle
-- `docs/07-adding-a-new-agent.md` — full agent onboarding workflow
-- `docs/08-agent-onboarding.md` — per-agent token onboarding checklist
+- `src/server.ts` — `parseBearer()`, `verifyHash()`, auth middleware
+- `migrations/001_init.sql` — agents table DDL
+- `src/scripts/provision-agent-token.ts` — single-agent token provisioning, rotation (`--force-rotate`), revocation (`--revoke`)
+- `src/scripts/provision-all-agents.ts` — batch provisioning (`--all --write-env`), batch rotation (`--force-rotate --confirm`)
+- `src/auth/upsert-agent.ts` — `upsertAgent()`, `generateToken()`, `checkEthosSealGate()` — shared provisioning logic
+- `docs/08-agent-onboarding.md` — operator runbook: first-time provisioning, rotation, revocation, ingestion token, troubleshooting
+- `docs/ARCH-013-the-one-ethos-seal.md` — Ethos Seal prerequisite (initialised before provisioning)

@@ -4,3 +4,10 @@ dist/
 .env
 .env.*
 !.env.example
+# Ethos Seal export — SEC-B4 (ARCH-013). Never commit.
+ethos.seal.json
+
+# Dashboard package
+packages/dashboard/node_modules/
+packages/dashboard/.env.local
+

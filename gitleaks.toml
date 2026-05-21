@@ -70,3 +70,26 @@ id = "gemini-api-key"
 description = "Google Gemini / Generative AI API key (AIza prefix)"
 regex = '''AIza[0-9A-Za-z\-_]{35}'''
 tags = ["google", "api-key", "gemini", "sec-19"]
+
+# ---------------------------------------------------------------------------
+# Custom Rule 4 — OPENHIVEOS_INGESTION_TOKEN
+#
+# Format: 64 lowercase hex characters (32 bytes CSPRNG — SEC-C1, ARCH-015).
+# A committed token would allow any caller to inject usage records into the
+# squad-api, distorting LLM cost analytics and flooding the llm_usage table.
+#
+# Pattern targets the env var assignment form to avoid false-positives on
+# arbitrary 64-char hex strings (e.g. SHA-256 hashes in comments/tests).
+# ---------------------------------------------------------------------------
+[[rules]]
+id = "openhiveos-ingestion-token"
+description = "OpenHiveOS OPENHIVEOS_INGESTION_TOKEN (64 lowercase hex chars)"
+regex = '''OPENHIVEOS_INGESTION_TOKEN\s*=\s*[0-9a-f]{64}'''
+tags = ["openhiveos", "api-token", "sec-c7", "arch-015"]
+
+  [rules.allowlist]
+  description = "Placeholder entries in example files"
+  regexes = [
+    # .env.example has OPENHIVEOS_INGESTION_TOKEN= with no value — not a real token
+    '''OPENHIVEOS_INGESTION_TOKEN\s*=\s*$''',
+  ]

@@ -47,19 +47,61 @@ services:
       PGPASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - ./migrations:/migrations:ro
-    # Check whether the `agents` table already exists before running.
-    # This guards against re-running CREATE TABLE statements that would fail.
-    command: >
+    # PRE-A1 gate: apply each migration in order, exactly once.
+    #
+    # Phase 1 — create schema_migrations tracking table (idempotent).
+    # Phase 2 — bootstrap: seed already-applied migrations from schema state
+    #           without re-running them (safe for existing deployments).
+    # Phase 3 — apply every .sql file not yet recorded, in filename order.
+    #
+    # Adding a new migration: drop a numbered .sql file in migrations/.
+    # The gate picks it up automatically on next `docker compose up`.
+    command: |
       bash -c "
-        APPLIED=$(psql -h postgres -U openhiveos -d openhiveos -tAc
+        set -euo pipefail
+
+        echo '[migrate] Phase 1 — ensuring schema_migrations tracking table...'
+        psql -h postgres -U openhiveos -d openhiveos -c \"
+          CREATE TABLE IF NOT EXISTS schema_migrations (
+            filename   TEXT        PRIMARY KEY,
+            applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          );
+        \"
+
+        echo '[migrate] Phase 2 — bootstrapping known-applied migrations...'
+        AGENTS=\$$(psql -h postgres -U openhiveos -d openhiveos -tAc \
           \"SELECT 1 FROM pg_tables WHERE schemaname='public' AND tablename='agents'\")
-        if [ \"$$APPLIED\" = '1' ]; then
-          echo '[migrate] Schema already applied — skipping'
-        else
-          echo '[migrate] Applying 001_init.sql...'
-          psql -h postgres -U openhiveos -d openhiveos -f /migrations/001_init.sql
-          echo '[migrate] Done'
+        if [ \"\$$AGENTS\" = '1' ]; then
+          psql -h postgres -U openhiveos -d openhiveos -c \
+            \"INSERT INTO schema_migrations (filename) VALUES ('001_init.sql') ON CONFLICT DO NOTHING;\"
+          echo '[migrate] 001_init.sql — bootstrapped (agents table detected)'
         fi
+
+        PROJECTS=\$$(psql -h postgres -U openhiveos -d openhiveos -tAc \
+          \"SELECT 1 FROM pg_tables WHERE schemaname='public' AND tablename='projects'\")
+        if [ \"\$$PROJECTS\" = '1' ]; then
+          psql -h postgres -U openhiveos -d openhiveos -c \
+            \"INSERT INTO schema_migrations (filename) VALUES ('002_coordination_utilities.sql') ON CONFLICT DO NOTHING;\"
+          echo '[migrate] 002_coordination_utilities.sql — bootstrapped (projects table detected)'
+        fi
+
+        echo '[migrate] Phase 3 — applying pending migrations...'
+        for f in /migrations/*.sql; do
+          name=\$$(basename \"\$$f\")
+          APPLIED=\$$(psql -h postgres -U openhiveos -d openhiveos -tAc \
+            \"SELECT 1 FROM schema_migrations WHERE filename='\$$name'\")
+          if [ \"\$$APPLIED\" = '1' ]; then
+            echo \"[migrate] \$$name — already applied\"
+          else
+            echo \"[migrate] Applying \$$name...\"
+            psql -h postgres -U openhiveos -d openhiveos -f \"\$$f\"
+            psql -h postgres -U openhiveos -d openhiveos -c \
+              \"INSERT INTO schema_migrations (filename) VALUES ('\$$name');\"
+            echo \"[migrate] \$$name — done\"
+          fi
+        done
+
+        echo '[migrate] Migration sequence complete'
       "
     restart: "no"
 
@@ -82,17 +124,131 @@ services:
       DATABASE_URL: postgresql://openhiveos:${POSTGRES_PASSWORD}@postgres:5432/openhiveos
       GEMINI_API_KEY: ${GEMINI_API_KEY}
       HEALTH_PORT: ${HEALTH_PORT:-3000}
+      # ARCH-013: boot step 3.5 — verifies the Ethos Seal file against DB signature.
+      ETHOS_SEAL_PATH: /ethos-seal/ethos.seal.json
     ports:
       - "${HEALTH_PORT:-3000}:3000"
     volumes:
       # Mount your Squad's agent roster — override the image default
       - ./squad.manifest.json:/app/squad.manifest.json:ro
+      # Ethos Seal — read-only at runtime. Written by one-init (init profile).
+      - ${ETHOS_SEAL_DIR:-./ethos-seal}:/ethos-seal:ro
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:3000 | grep -q '\"status\":\"ok\"'"]
       interval: 15s
       timeout: 5s
       retries: 3
       start_period: 20s
+
+  # ---------------------------------------------------------------------------
+  # Squad API — HTTP server for the operator dashboard (ARCH-012 A4)
+  #
+  # Serves the compiled dashboard SPA on / and REST endpoints on /api/*.
+  # Bound to 127.0.0.1 on the host — never expose 0.0.0.0 without a TLS
+  # reverse proxy in front (SEC-A3). Internal Compose alias: squad-api:3005.
+  # ---------------------------------------------------------------------------
+  squad-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    command: ["node", "dist/squad-api/index.js"]
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgresql://openhiveos:${POSTGRES_PASSWORD}@postgres:5432/openhiveos # gitleaks:allow
+      SQUAD_API_PORT: ${SQUAD_API_PORT:-3005}
+      # Must be 0.0.0.0 inside the container so Compose health checks and
+      # internal routing work. Host binding below keeps external exposure to
+      # 127.0.0.1 only (SEC-A3: squad-api binds loopback on the host).
+      SQUAD_API_HOST: "0.0.0.0"
+      OPENHIVEOS_INGESTION_TOKEN: ${OPENHIVEOS_INGESTION_TOKEN}
+    ports:
+      # PRE-2 GATE: port 3005 confirmed free on production host.
+      # Reverse proxy entry required before exposing publicly.
+      - "127.0.0.1:${SQUAD_API_PORT:-3005}:${SQUAD_API_PORT:-3005}"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:${SQUAD_API_PORT:-3005}/health | grep -q '\"status\":\"ok\"'"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  # ---------------------------------------------------------------------------
+  # Ethos Seal init — Stage 1 of canonical operator onboarding (ARCH-013 B6)
+  #
+  # Generates and stores the Ethos Seal. Run ONCE before provisioning agents.
+  # Writes the seal JSON to the ETHOS_SEAL_DIR bind mount on the host so
+  # operators can back it up independently of the container lifecycle.
+  #
+  # Not on the normal `docker compose up` path (profiles: ["init"]).
+  # Invocation: docker compose --profile init run --rm one-init
+  #
+  # Stage ordering:
+  #   Stage 1 — one-init   (this service) — initialise the Ethos Seal
+  #   Stage 2 — provision  (next service) — provision agent tokens
+  # ---------------------------------------------------------------------------
+  one-init:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    command: ["node", "dist/scripts/one-init.js"]
+    profiles: ["init"]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgresql://openhiveos:${POSTGRES_PASSWORD}@postgres:5432/openhiveos # gitleaks:allow
+      ETHOS_SEAL_SECRET: ${ETHOS_SEAL_SECRET}
+      ETHOS_SEAL_PATH: /ethos-seal/ethos.seal.json
+    volumes:
+      # rw — one-init creates the seal file here. ETHOS_SEAL_DIR must exist
+      # on the host before running. Use an absolute path in production.
+      - ${ETHOS_SEAL_DIR:-./ethos-seal}:/ethos-seal:rw
+
+  # ---------------------------------------------------------------------------
+  # Agent provision — Stage 2 of canonical operator onboarding (ARCH-014 C5)
+  #
+  # Provisions bearer tokens for all agents defined in squad.manifest.json.
+  # Writes tokens to PROVISION_ENV_DIR/.env.tokens on the host.
+  # Reads the Ethos Seal (ro) — fails fast if one-init has not run.
+  #
+  # Not on the normal `docker compose up` path (profiles: ["init"]).
+  # Invocation: docker compose --profile init run --rm provision
+  #
+  # Run Stage 1 first: docker compose --profile init run --rm one-init
+  # ---------------------------------------------------------------------------
+  provision:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    command: ["node", "dist/scripts/provision-all-agents.js", "--all", "--write-env", "/provision/.env.tokens"]
+    profiles: ["init"]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgresql://openhiveos:${POSTGRES_PASSWORD}@postgres:5432/openhiveos # gitleaks:allow
+      ETHOS_SEAL_PATH: /ethos-seal/ethos.seal.json
+      PROVISION_ENV_DIR: /provision
+    volumes:
+      # Seal — read-only. Stage 1 must have run first.
+      - ${ETHOS_SEAL_DIR:-./ethos-seal}:/ethos-seal:ro
+      # Tokens output — rw bind mount so .env.tokens lands on host disk.
+      # PROVISION_ENV_DIR must exist on the host before running.
+      - ${PROVISION_ENV_DIR:-./provision}:/provision:rw
 
 volumes:
   postgres_data:

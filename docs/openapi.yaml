@@ -1,0 +1,537 @@
+openapi: "3.1.0"
+
+info:
+  title: OpenHiveOS Squad API
+  version: "0.2.0"
+  description: |
+    HTTP API for the OpenHiveOS operator dashboard and LLM usage ingestion.
+
+    There are two distinct authentication surfaces:
+
+    - **Dashboard routes** (`/api/*`): Bearer token issued to a registered agent
+      via `provision-agent-token.ts`. Identity is resolved server-side from the
+      token hash — the caller cannot supply or override their agent slug.
+
+    - **Ingestion route** (`/internal/usage`): Shared secret
+      (`OPENHIVEOS_INGESTION_TOKEN` — 64-char lowercase hex, 32 bytes CSPRNG).
+      Used exclusively by Bridge to POST LLM usage records.
+
+    Source authority: ARCH-012 (dashboard), ARCH-013 (ethos-seal), ARCH-015 (usage ingestion).
+
+servers:
+  - url: "http://localhost:3005"
+    description: Local development (squad-api default port)
+
+# ---------------------------------------------------------------------------
+# Security schemes
+# ---------------------------------------------------------------------------
+components:
+  securitySchemes:
+    AgentBearer:
+      type: http
+      scheme: bearer
+      description: |
+        Per-agent bearer token in the format `<32-hex-salt>.<64-hex-secret>`.
+        Issued by `npx tsx src/scripts/provision-agent-token.ts <slug>`.
+        Identity is resolved server-side — the caller cannot override their slug.
+
+    IngestionBearer:
+      type: http
+      scheme: bearer
+      description: |
+        Shared secret for Bridge → squad-api ingestion.
+        Value of `OPENHIVEOS_INGESTION_TOKEN` — 64 lowercase hex chars (32 bytes CSPRNG).
+        Generate: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`
+        See: docs/08-agent-onboarding.md §6 for rotation procedure (SEC-C10).
+
+  # ---------------------------------------------------------------------------
+  # Reusable schemas
+  # ---------------------------------------------------------------------------
+  schemas:
+    # --- Ethos Seal -----------------------------------------------------------
+    EthosSealMeta:
+      type: object
+      required: [version, signature, activated_at, activated_by]
+      properties:
+        version:
+          type: integer
+          description: Monotonically increasing revision counter. Starts at 1.
+          example: 3
+        signature:
+          type: string
+          description: HMAC-SHA256(canonical_payload_json, ETHOS_SEAL_SECRET), hex-encoded.
+          example: "a1b2c3..."
+        activated_at:
+          type: string
+          format: date-time
+          description: ISO 8601 timestamp when this seal version was activated.
+        activated_by:
+          type: string
+          enum: ["cli:init", "cli:revise", "cli:recovery"]
+          description: Provisioning context for this seal version.
+
+    EthosSealFull:
+      allOf:
+        - $ref: "#/components/schemas/EthosSealMeta"
+        - type: object
+          properties:
+            payload:
+              type: object
+              description: Full structured seal content (squad name, agents, Five Laws, seat definitions). Only present when ?include=payload is requested.
+
+    EthosSealResponse:
+      type: object
+      required: [active, history]
+      properties:
+        active:
+          $ref: "#/components/schemas/EthosSealMeta"
+        payload:
+          $ref: "#/components/schemas/EthosSealFull/allOf/1/properties/payload"
+          description: Present only when ?include=payload is requested.
+        history:
+          type: array
+          description: Last 10 deactivated seal versions, ordered by version DESC. Metadata only — no payload.
+          items:
+            $ref: "#/components/schemas/EthosSealMeta"
+
+    # --- LLM Usage -----------------------------------------------------------
+    AgentMonthRow:
+      type: object
+      required: [agent_slug, month, session_count, prompt_tokens, completion_tokens, cost_usd]
+      properties:
+        agent_slug:
+          type: string
+          description: Agent identifier (matches agents.slug).
+          example: "murphy"
+        month:
+          type: string
+          format: date-time
+          description: First day of the calendar month (UTC, date_trunc output).
+        session_count:
+          type: string
+          description: Number of distinct sessions in this month. Returned as string by PostgreSQL COUNT.
+          example: "42"
+        prompt_tokens:
+          type: string
+          description: Total prompt tokens consumed in this month.
+          example: "1250000"
+        completion_tokens:
+          type: string
+          description: Total completion tokens consumed in this month.
+          example: "84000"
+        cost_usd:
+          type: string
+          description: Total cost in USD for this month. Returned as string by PostgreSQL SUM.
+          example: "12.45"
+
+    AgentUsageResponse:
+      type: object
+      required: [months, data]
+      properties:
+        months:
+          type: integer
+          description: Number of months included in the response window.
+          minimum: 1
+          maximum: 24
+          example: 6
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/AgentMonthRow"
+
+    AgentDetailResponse:
+      type: object
+      required: [agent_slug, data]
+      properties:
+        agent_slug:
+          type: string
+          example: "murphy"
+        data:
+          type: array
+          description: Monthly rows for the agent, ordered by month DESC. Always 12-month window.
+          items:
+            $ref: "#/components/schemas/AgentMonthRow"
+
+    TaskCostRow:
+      type: object
+      required: [task_id, task_title, project_name, request_count, total_tokens, cost_usd]
+      properties:
+        task_id:
+          type: string
+          description: Numeric task ID as string (PostgreSQL return type).
+          example: "1234"
+        task_title:
+          type: string
+          example: "ARCH-015 A6 — wire ingestion route"
+        project_name:
+          type: string
+          example: "openhiveos"
+        assigned_agent:
+          type: string
+          nullable: true
+          example: "murphy"
+        request_count:
+          type: string
+          description: Total number of LLM requests attributed to this task.
+          example: "87"
+        total_tokens:
+          type: string
+          description: Prompt + completion tokens combined.
+          example: "340000"
+        cost_usd:
+          type: string
+          example: "4.12"
+        first_activity:
+          type: string
+          format: date-time
+          nullable: true
+        last_activity:
+          type: string
+          format: date-time
+          nullable: true
+
+    # --- Error ---------------------------------------------------------------
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          description: Human-readable error message.
+          example: "No usage data found for agent \"murphy\""
+
+    # --- Ingestion payload ---------------------------------------------------
+    UsageIngestionPayload:
+      type: object
+      required:
+        - session_id
+        - loop_index
+        - agent_slug
+        - model
+        - provider
+        - prompt_tokens
+        - completion_tokens
+        - cost_usd
+      additionalProperties: false
+      description: |
+        LLM usage record posted by Bridge. Unknown fields are rejected with 400 (SEC-C4 strict mode).
+      properties:
+        session_id:
+          type: string
+          pattern: "^[a-z][a-z0-9_-]*:[^:]+:\\d{13}$"
+          description: |
+            Composite identifier in the format `<agent-slug>:<context-id>:<unix-ms>`.
+            Must match the opensquad session_id format exactly (SEC-C5).
+          example: "murphy:abc123:1716393600000"
+        loop_index:
+          type: integer
+          minimum: 0
+          description: |
+            Zero-based index of this request within the session. Required — not optional.
+            Combined with session_id in a UNIQUE constraint to prevent replay injection (SEC-C6).
+          example: 0
+        agent_slug:
+          type: string
+          minLength: 1
+          maxLength: 64
+          example: "murphy"
+        model:
+          type: string
+          minLength: 1
+          maxLength: 256
+          example: "gemini-2.5-pro"
+        provider:
+          type: string
+          minLength: 1
+          maxLength: 128
+          example: "google"
+        prompt_tokens:
+          type: integer
+          minimum: 0
+          example: 12500
+        completion_tokens:
+          type: integer
+          minimum: 0
+          example: 840
+        cost_usd:
+          type: number
+          minimum: 0
+          description: |
+            Cost in USD supplied by Bridge. Required — server does not compute pricing (SEC-C9).
+          example: 0.0138
+        cache_read_tokens:
+          type: integer
+          minimum: 0
+          description: Optional. Prompt cache read tokens (provider-specific).
+          example: 4000
+        cache_creation_tokens:
+          type: integer
+          minimum: 0
+          description: Optional. Prompt cache write tokens (provider-specific).
+          example: 0
+        task_id:
+          type: integer
+          minimum: 1
+          description: Optional. Factory task ID to attribute this usage to. Links cost to a specific task in the v_cost_by_task view.
+          example: 1394
+
+# ---------------------------------------------------------------------------
+# Paths
+# ---------------------------------------------------------------------------
+paths:
+
+  # -------------------------------------------------------------------------
+  # Ethos Seal
+  # -------------------------------------------------------------------------
+  /api/ethos-seal:
+    get:
+      operationId: getEthosSeal
+      summary: Get the active Ethos Seal
+      description: |
+        Returns the active Ethos Seal record plus the last 10 deactivated (historical) versions.
+
+        By default returns metadata only (version, signature, activated_at, activated_by).
+        Pass `?include=payload` to also return the structured payload JSONB.
+
+        The payload is the Squad's constitutional document — treat it with the same
+        sensitivity as the Ethos Seal itself. It must not appear in application logs (SEC-B7).
+      tags: [Ethos Seal]
+      security:
+        - AgentBearer: []
+      parameters:
+        - name: include
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: ["payload"]
+          description: Pass `payload` to include the full payload JSONB on the active seal.
+      responses:
+        "200":
+          description: Active seal and history returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EthosSealResponse"
+        "401":
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: No active seal found (one-init has not been run), or database error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # -------------------------------------------------------------------------
+  # Usage — dashboard analytics
+  # -------------------------------------------------------------------------
+  /api/usage/agents:
+    get:
+      operationId: getAgentUsage
+      summary: All agents — monthly cost aggregates
+      description: |
+        Returns monthly LLM cost aggregates for all agents in the Squad, for the
+        last N months (default 6, max 24).
+
+        Returns an empty `data` array when `llm_usage` has no rows (feature is dark
+        until Bridge is deployed and connected). This is expected and not an error.
+
+        Queries the `v_cost_by_agent_month` view via `openhiveos_reader` role (SEC-A5).
+      tags: [Usage]
+      security:
+        - AgentBearer: []
+      parameters:
+        - name: months
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 24
+            default: 6
+          description: Number of calendar months to include. Clamped to [1, 24].
+      responses:
+        "200":
+          description: Usage aggregates returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentUsageResponse"
+        "401":
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/usage/agents/{name}:
+    get:
+      operationId: getAgentUsageDetail
+      summary: Single agent — monthly cost detail
+      description: |
+        Returns monthly cost detail for a single agent, covering the last 12 months.
+        Returns 404 if no usage data exists for the given agent slug.
+
+        Queries the `v_cost_by_agent_month` view via `openhiveos_reader` role (SEC-A5).
+      tags: [Usage]
+      security:
+        - AgentBearer: []
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Agent slug (e.g. `murphy`). Must not start with `-`.
+      responses:
+        "200":
+          description: Per-agent monthly detail returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentDetailResponse"
+        "400":
+          description: Invalid agent name (empty or starts with `-`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: No usage data found for the given agent slug.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/usage/tasks/{id}:
+    get:
+      operationId: getTaskCost
+      summary: Task cost breakdown
+      description: |
+        Returns lifetime cost attribution for a single Factory task.
+        Returns 404 if the task has no usage records in `llm_usage`.
+
+        Queries the `v_cost_by_task` view via `openhiveos_reader` role (SEC-A5).
+      tags: [Usage]
+      security:
+        - AgentBearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+          description: Numeric task ID.
+      responses:
+        "200":
+          description: Task cost breakdown returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskCostRow"
+        "400":
+          description: Task ID is not a positive integer.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: No usage data found for the given task ID.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # -------------------------------------------------------------------------
+  # Internal — ingestion (Bridge → squad-api)
+  # -------------------------------------------------------------------------
+  /internal/usage:
+    post:
+      operationId: ingestUsage
+      summary: Ingest LLM usage record from Bridge
+      description: |
+        Accepts a single LLM token and cost record from Bridge and stores it in
+        `llm_usage`. Called once per LLM request loop in a Bridge session.
+
+        **Auth:** `OPENHIVEOS_INGESTION_TOKEN` — a shared 64-char hex secret separate
+        from the agent bearer token system. See docs/08-agent-onboarding.md §6 for
+        the rotation procedure (SEC-C10).
+
+        **Idempotency:** A duplicate `(session_id, loop_index)` pair returns 409.
+        This is the expected behaviour for Bridge retries — not a security incident (SEC-C6).
+
+        **Rate limit:** 60 requests per minute per IP (SEC-C3).
+
+        **Unknown fields:** Rejected with 400 (SEC-C4 strict mode — `additionalProperties: false`).
+      tags: [Ingestion]
+      security:
+        - IngestionBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UsageIngestionPayload"
+      responses:
+        "201":
+          description: Usage record stored successfully.
+        "400":
+          description: Payload validation failed — missing required field, wrong type, unknown field, or malformed session_id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid `OPENHIVEOS_INGESTION_TOKEN`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Duplicate `(session_id, loop_index)` — record already exists. Bridge should not retry this record.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: |
+            `cost_usd` is missing or null. Cost must be supplied by Bridge —
+            server-side pricing computation is not supported (SEC-C9).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: Rate limit exceeded (60 req/min). Bridge should back off and retry.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+# ---------------------------------------------------------------------------
+# Tags (display grouping)
+# ---------------------------------------------------------------------------
+tags:
+  - name: Ethos Seal
+    description: Squad constitutional document — versioned, HMAC-signed, boot-verified.
+  - name: Usage
+    description: LLM cost analytics for the operator dashboard.
+  - name: Ingestion
+    description: Internal endpoint for Bridge to POST usage records. Not for browser clients.

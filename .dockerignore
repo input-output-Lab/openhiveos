@@ -5,6 +5,8 @@ dist
 .env
 .env.*
 !.env.example
+# Ethos Seal export — SEC-B4 (ARCH-013). Never bake into image.
+ethos.seal.json
 docs
 *.md
 !README.md

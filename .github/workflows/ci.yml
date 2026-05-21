@@ -123,3 +123,75 @@ jobs:
             exit 1
           fi
           echo "Cron FK constraints OK — crons_project_id_fkey and crons_owner_agent_slug_fkey active"
+
+      # -----------------------------------------------------------------
+      # PRE-A1 gate extension — ARCH-013, ARCH-014, ARCH-015 (D13)
+      # Migrations 003–005 added after Sprint 5 scope was established.
+      # The openhiveos runtime role must exist before 003_squad_api_role.sql
+      # applies — CI uses openhiveos_ci, so create openhiveos as an alias.
+      # -----------------------------------------------------------------
+
+      - name: Create openhiveos runtime role for migration compatibility
+        run: psql -c "CREATE ROLE openhiveos WITH LOGIN"
+
+      - name: Apply migration 003a — Dashboard agent principal (alphabetically first)
+        run: psql -f migrations/003_dashboard_agent.sql
+
+      - name: Apply migration 003b — Squad API reader role
+        run: psql -f migrations/003_squad_api_role.sql
+
+      - name: Apply migration 004 — Ethos Seal
+        run: psql -f migrations/004_ethos_seal.sql
+
+      - name: Apply migration 005 — LLM Usage Tracking
+        run: psql -f migrations/005_llm_usage.sql
+
+      - name: Verify schema — migrations 003-005 tables present
+        run: |
+          MISSING=$(psql -t -A -c "
+            SELECT string_agg(t, ', ' ORDER BY t)
+            FROM unnest(ARRAY['ethos_seals','llm_usage']) AS t
+            WHERE t NOT IN (
+              SELECT tablename FROM pg_tables WHERE schemaname = 'public'
+            )
+          ")
+          if [ -n "$MISSING" ]; then
+            echo "::error::Migration 004/005 validation failed. Missing tables: $MISSING"
+            exit 1
+          fi
+          echo "Schema OK — ethos_seals and llm_usage present"
+
+      - name: Verify ARCH-015 replay guard — UNIQUE constraint on session_id + loop_index
+        run: |
+          MISSING=$(psql -t -A -c "
+            SELECT string_agg(c, ', ' ORDER BY c)
+            FROM unnest(ARRAY['uq_llm_usage_session_loop']) AS c
+            WHERE c NOT IN (
+              SELECT conname FROM pg_constraint
+              WHERE conrelid = 'llm_usage'::regclass
+            )
+          ")
+          if [ -n "$MISSING" ]; then
+            echo "::error::ARCH-015 replay guard missing: $MISSING"
+            exit 1
+          fi
+          echo "Replay guard OK — uq_llm_usage_session_loop present"
+
+      - name: Verify ARCH-015 analytical views — all three squad-api query targets present
+        run: |
+          MISSING=$(psql -t -A -c "
+            SELECT string_agg(v, ', ' ORDER BY v)
+            FROM unnest(ARRAY[
+              'v_cost_by_agent_month',
+              'v_cost_by_project_month',
+              'v_cost_by_task'
+            ]) AS v
+            WHERE v NOT IN (
+              SELECT viewname FROM pg_views WHERE schemaname = 'public'
+            )
+          ")
+          if [ -n "$MISSING" ]; then
+            echo "::error::Migration 005 incomplete — analytical views missing: $MISSING"
+            exit 1
+          fi
+          echo "Views OK — v_cost_by_agent_month, v_cost_by_project_month, v_cost_by_task present"

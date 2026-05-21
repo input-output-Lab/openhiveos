@@ -19,6 +19,10 @@ const ConfigSchema = z.object({
   ),
   // HTTP port for the health endpoint (separate from MCP stdio transport)
   HEALTH_PORT: z.coerce.number().int().positive().default(3000),
+  // Ethos Seal — ARCH-013 Step 3.5 boot check (checkEthosSeal).
+  // ETHOS_SEAL_SECRET is NOT here — the MCP server never re-derives the HMAC.
+  // It only compares the stored DB signature against the exported file signature.
+  ETHOS_SEAL_PATH: z.string().min(1).default('./ethos.seal.json'),
 })
 
 export type Config = z.infer<typeof ConfigSchema>

@@ -4,6 +4,7 @@
 //   1. Validate env      (config.ts  — throws on missing vars incl. AGENT_TOKEN)
 //   2. Connect DB        (db/client  — throws on connection failure)
 //   3. Check fingerprint (db/fingerprint — throws on schema drift)
+//   3.5 Check Ethos Seal (db/ethos-seal — exits if seal absent or drifted, ARCH-013)
 //   4. Resolve identity  (auth/identity — throws if AGENT_TOKEN unresolvable)
 //   5. Start health      (health     — GET /health on HEALTH_PORT)
 //   6. Connect MCP       (StdioServerTransport — begins accepting tool calls)
@@ -15,6 +16,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { connectDb } from './db/client.js'
 import { checkFingerprint } from './db/fingerprint.js'
+import { checkEthosSeal } from './db/ethos-seal.js'
 import { startHealthServer } from './health.js'
 import { resolveIdentity } from './auth/identity.js'
 import { handleGetDisposition, getDispositionSchema } from './primitives/get-disposition.js'
@@ -41,6 +43,7 @@ import { handleDeleteCron, deleteCronSchema } from './utilities/delete-cron.js'
 
 await connectDb()           // Step 2
 await checkFingerprint()    // Step 3
+await checkEthosSeal()      // Step 3.5 — exits on absent or drifted seal (ARCH-013 SEC-B8)
 const agentSlug = await resolveIdentity() // Step 4 — halts process on failure
 startHealthServer()         // Step 5
 
