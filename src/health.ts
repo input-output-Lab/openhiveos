@@ -12,32 +12,60 @@ import { manifest } from './squad/manifest.js'
 // Port: HEALTH_PORT env var (default 3000)
 //
 // S2-08 (ARCH-008 addendum): the {agents} field was stripped from this
-// response. Squad composition is internal information — exposing agent slugs
+// response. Squad composition is internal information -- exposing agent slugs
 // on an unauthenticated endpoint is a reconnaissance vector if HEALTH_PORT
 // is ever published externally. The health probe needs {status} and {db}
 // only. Locksmith reviewed and accepted this resolution (S2-02).
+//
+// S4-04 (ARCH-011): health check extended to verify schema integrity beyond
+// DB connectivity. A live DB with a missing crons table indicates migration
+// 003 has not been applied -- the server will start (fingerprint guards boot)
+// but the health endpoint reports 'degraded' to surface this to operators.
 // ---------------------------------------------------------------------------
+
+// All tables required for the crons registration layer (migration 003).
+// If any of these are absent the response status degrades to 'degraded'.
+const CRON_TIER_TABLES = ['crons'] as const
 
 interface HealthPayload {
   status: 'ok' | 'degraded'
   version: string
   squad: string
   db: 'connected' | 'error'
+  schema?: 'ok' | 'degraded'
+  missing_tables?: string[]
   error?: string
+}
+
+async function checkSchema(): Promise<{ ok: boolean; missing: string[] }> {
+  const result = await pool.query<{ tablename: string }>(
+    `SELECT tablename
+     FROM pg_tables
+     WHERE schemaname = 'public'
+       AND tablename = ANY($1::text[])`,
+    [CRON_TIER_TABLES],
+  )
+  const found = new Set(result.rows.map((r) => r.tablename))
+  const missing = CRON_TIER_TABLES.filter((t) => !found.has(t))
+  return { ok: missing.length === 0, missing }
 }
 
 export function startHealthServer(): void {
   const server = createServer((_req, res) => {
     pool
       .query('SELECT 1')
-      .then(() => {
+      .then(async () => {
+        const schema = await checkSchema()
         const payload: HealthPayload = {
-          status: 'ok',
+          status: schema.ok ? 'ok' : 'degraded',
           version: '0.1.0',
           squad: manifest.squad,
           db: 'connected',
+          schema: schema.ok ? 'ok' : 'degraded',
+          ...(schema.missing.length > 0 ? { missing_tables: schema.missing } : {}),
         }
-        res.writeHead(200, { 'Content-Type': 'application/json' })
+        const httpStatus = schema.ok ? 200 : 503
+        res.writeHead(httpStatus, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify(payload))
       })
       .catch((err: unknown) => {

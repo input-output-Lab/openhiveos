@@ -14,7 +14,8 @@ import { pool } from './client.js'
 const REQUIRED_TABLES = ['agents', 'sops', 'memories', 'thoughts', 'dispositions'] as const
 
 // Coordination Utility tables — added by migration 002_coordination_utilities.sql
-const COORDINATION_TABLES = ['projects', 'tasks', 'sprints'] as const
+// 'crons' added in migration 003_crons.sql (ARCH-011, Sprint 4)
+const COORDINATION_TABLES = ['projects', 'tasks', 'sprints', 'crons'] as const
 
 const ALL_REQUIRED_TABLES = [...REQUIRED_TABLES, ...COORDINATION_TABLES]
 
@@ -54,8 +55,12 @@ export async function checkFingerprint(): Promise<void> {
   // Check Coordination Utility tables (migration 002)
   const missingCoordination = COORDINATION_TABLES.filter((t) => !found.has(t))
   if (missingCoordination.length > 0) {
+    const migrationHint =
+      missingCoordination.includes('crons')
+        ? 'Run migrations/003_crons.sql (and 002_coordination_utilities.sql if also missing projects/tasks/sprints).'
+        : 'Run migrations/002_coordination_utilities.sql.'
     throw new Error(
-      `[fingerprint] Missing Coordination Utility tables: ${missingCoordination.join(', ')}. Run migrations/002_coordination_utilities.sql.`,
+      `[fingerprint] Missing Coordination Utility tables: ${missingCoordination.join(', ')}. ${migrationHint}`,
     )
   }
 

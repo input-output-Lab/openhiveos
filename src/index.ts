@@ -33,6 +33,11 @@ import { handleCreateTask, createTaskSchema } from './utilities/create-task.js'
 import { handleUpdateTask, updateTaskSchema } from './utilities/update-task.js'
 import { handleQueryTasks, queryTasksSchema } from './utilities/query-tasks.js'
 import { handleAdvanceSprint, advanceSprintSchema } from './utilities/advance-sprint.js'
+import { handleQuerySprints, querySprintsSchema } from './utilities/query-sprints.js'
+import { handleCreateCron, createCronSchema } from './utilities/create-cron.js'
+import { handleUpdateCron, updateCronSchema } from './utilities/update-cron.js'
+import { handleQueryCrons, queryCronsSchema } from './utilities/query-crons.js'
+import { handleDeleteCron, deleteCronSchema } from './utilities/delete-cron.js'
 
 await connectDb()           // Step 2
 await checkFingerprint()    // Step 3
@@ -138,6 +143,44 @@ server.registerTool('query_tasks', { inputSchema: queryTasksSchema.shape }, asyn
 // advance_sprint — write, requires agentSlug (SEC-21 + SEC-23)
 server.registerTool('advance_sprint', { inputSchema: advanceSprintSchema.shape }, async (args) => ({
   content: [{ type: 'text' as const, text: JSON.stringify(await handleAdvanceSprint(args, agentSlug)) }],
+}))
+
+// query_sprints — read, caller-scoped (ARCH-011 Decision 2 — returns sprints for
+// projects owned by the calling agent only; agentSlug is the authorization predicate)
+server.registerTool('query_sprints', { inputSchema: querySprintsSchema.shape }, async (args) => ({
+  content: [{ type: 'text' as const, text: JSON.stringify(await handleQuerySprints(args, agentSlug)) }],
+}))
+
+// ---------------------------------------------------------------------------
+// Cron Utility registrations (migration 003 — ARCH-011)
+//
+// All write utilities receive agentSlug as their second argument.
+// SEC-26: tool_name validated against REGISTERED_TOOL_NAMES as const (tool-registry.ts)
+// SEC-27: payload validated at Zod layer — plain object, ≤16KB, ≤5 nesting levels
+// SEC-28: schedule validated via cron-parser at Zod refine before any DB write
+// SEC-29: owner_agent_slug server-injected; ownership gate in WHERE clause on writes
+// SEC-30: ALLOWED_CRON_FILTERS as const in db/queries/crons.ts
+// ---------------------------------------------------------------------------
+
+// query_crons — read, open with filter whitelist (SEC-30)
+// Cross-agent enumeration gap documented in ARCH-011 Tech Debt #2 (deferred post-v0.1)
+server.registerTool('query_crons', { inputSchema: queryCronsSchema.shape }, async (args) => ({
+  content: [{ type: 'text' as const, text: JSON.stringify(await handleQueryCrons(args)) }],
+}))
+
+// update_cron — write, requires agentSlug (SEC-26 + SEC-27 + SEC-28 + SEC-29)
+server.registerTool('update_cron', { inputSchema: updateCronSchema.shape }, async (args) => ({
+  content: [{ type: 'text' as const, text: JSON.stringify(await handleUpdateCron(args, agentSlug)) }],
+}))
+
+// delete_cron — write, requires agentSlug (SEC-29 soft delete)
+server.registerTool('delete_cron', { inputSchema: deleteCronSchema.shape }, async (args) => ({
+  content: [{ type: 'text' as const, text: JSON.stringify(await handleDeleteCron(args, agentSlug)) }],
+}))
+
+// create_cron — write, requires agentSlug (SEC-26 + SEC-27 + SEC-28 + SEC-29)
+server.registerTool('create_cron', { inputSchema: createCronSchema.shape }, async (args) => ({
+  content: [{ type: 'text' as const, text: JSON.stringify(await handleCreateCron(args, agentSlug)) }],
 }))
 
 const transport = new StdioServerTransport()
