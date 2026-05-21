@@ -136,3 +136,26 @@ export interface ProjectBoard extends Project {
   rework_count: number
   tasks: TaskSummary[]
 }
+
+// ---------------------------------------------------------------------------
+// Cron Utility types (introduced in migration 003)
+// Sprint 4 ships the registration layer only. last_run_at is always null
+// until the Sprint 5 cron worker is delivered.
+// ---------------------------------------------------------------------------
+
+export type CronStatus = 'active' | 'paused' | 'deleted'
+
+export interface Cron {
+  id: number
+  project_id: number
+  owner_agent_slug: string
+  name: string
+  description: string | null
+  schedule: string
+  tool_name: string
+  payload: Record<string, unknown> | null
+  status: CronStatus
+  last_run_at: Date | null
+  created_at: Date
+  updated_at: Date
+}
