@@ -3,8 +3,8 @@
 *This glossary is the single source of truth for all OpenHiveOS terminology. Every document, guide, PR description, and team conversation uses these terms exactly as defined here. Any document using a synonym for a term below must be corrected on sight. Terms marked **ARCH-006 locked** cannot be redefined without a new ADR.*
 
 **Owner:** Clarence  
-**Last updated:** 2026-05-20  
-**Source authority:** ARCH-003, ARCH-005, ARCH-006, ARCH-007, ARCH-008  
+**Last updated:** 2026-05-20 (Sprint 3 close — project, task, sprint, project board added)  
+**Source authority:** ARCH-003, ARCH-005, ARCH-006, ARCH-007, ARCH-008, ARCH-010  
 
 ---
 
@@ -40,9 +40,10 @@ The credential that authenticates an agent process to its Squad Instance at boot
 
 A tool in the second tier of the Agent OS two-tier model. Coordination Utilities cover project and task management, sprint coordination, cron scheduling, and other active-development capabilities. Unlike OS Primitives, Coordination Utilities operate at an active-development pace — their APIs may change between sprints. Integrations connect to the Coordination Utilities tier only and are architecturally prohibited from accessing OS Primitives directly.
 
-**Examples:** `create_task`, `query_projects`, `advance_sprint`, `create_cron`  
-**See also:** OS Primitive, Integration  
-**Source:** ARCH-003, ARCH-005
+**Sprint 3 tools (shipped):** `create_project`, `update_project`, `query_projects`, `get_project_board`, `create_task`, `update_task`, `query_tasks`, `advance_sprint`  
+**Sprint 4 planned:** `create_cron`, `update_cron`, `query_crons`, `delete_cron`, `query_sprints`  
+**See also:** OS Primitive, Integration, project, task, sprint  
+**Source:** ARCH-003, ARCH-005, ARCH-010
 
 ---
 
@@ -99,6 +100,26 @@ The open standard protocol, published by Anthropic in 2024, over which AI agent 
 
 **See also:** OS Primitive, Coordination Utility  
 **Source:** ARCH-008 Decision 1
+
+---
+
+## project
+
+A named unit of work owned by one agent, tracked by the Coordination Utilities tier. A project has a unique kebab-case slug, a display name, a status (`active` or `archived`), and an `owner_agent_slug` that permanently records the owning agent. Projects are the parent container for tasks and sprints. Every task belongs to exactly one project; every sprint is associated with one project. Only the project owner can create tasks or advance sprints under that project.
+
+**Stored in:** `projects` table (migration `002_coordination_utilities.sql`)  
+**See also:** task, sprint, project board, Coordination Utility  
+**Source:** ARCH-010
+
+---
+
+## project board
+
+The combined view of a project and all its tasks, returned by the `get_project_board` tool. Includes the full project row, per-status task counts (`todo_count`, `wip_count`, `review_count`, `done_count`, `rework_count`), and the full `tasks` array ordered by creation date. The project board is scoped to the calling agent's ownership — agents cannot read the board of a project they do not own.
+
+**Returned by:** `get_project_board`  
+**See also:** project, task, Coordination Utility  
+**Source:** ARCH-010
 
 ---
 
@@ -167,12 +188,49 @@ The architectural principle that agent identity — who is making a tool call �
 
 ---
 
+## sprint
+
+A time-box record within a project, created by the `advance_sprint` tool. Each sprint has a sequential number (Sprint 1, Sprint 2, …), an optional goal, and a `started_at` timestamp. Sprint rows are append-only — they are never updated after creation. Sprint history is preserved permanently as one row per sprint. The sprint number is always auto-computed as `MAX(current sprint number) + 1`; callers do not supply it. Concurrent `advance_sprint` calls for the same project are mediated by a `UNIQUE(project_id, sprint_number)` database constraint.
+
+**Stored in:** `sprints` table (migration `002_coordination_utilities.sql`)  
+**See also:** project, `advance_sprint`, Coordination Utility  
+**Source:** ARCH-010 Decision 1
+
+---
+
 ## SOP Entry
 
 A Standard Operating Procedure entry stored in the `sops` table. SOP entries represent the documented "Way" the team operates — process steps, behavioral guidelines, and operational standards that agents can retrieve by semantic similarity via `search_sops`. Each SOP entry has a category, optional agent scope, instruction text, source path reference, and a 768-dimension pgvector embedding. SOP entries are OS Primitives tier data.
 
 **See also:** OS Primitive, pgvector, Episodic Memory  
 **Source:** ARCH-008, `src/db/queries/sops.ts`
+
+---
+
+## task
+
+An individual unit of work within a project, tracked by the Coordination Utilities tier. Each task has a title, optional description, a status value drawn from the five-value task status enum, and an optional assignee. Tasks belong to exactly one project. Only the project owner can create, assign, or update tasks under that project — an assignee cannot modify their own task unless they also own the parent project (named debt, Sprint 4–5).
+
+**Stored in:** `tasks` table (migration `002_coordination_utilities.sql`)  
+**See also:** task status, project, Coordination Utility  
+**Source:** ARCH-010
+
+---
+
+## task status
+
+The five values a task's `status` field can hold. The closed enum is enforced at both the Zod validation layer and the PostgreSQL CHECK constraint.
+
+| Value | Meaning |
+|---|---|
+| `todo` | Not yet started — the default on creation |
+| `wip` | Work in progress |
+| `review` | Complete and waiting for review |
+| `done` | Accepted and closed |
+| `rework` | Reviewed and sent back for revision |
+
+**See also:** task, `update_task`  
+**Source:** ARCH-010, `src/types.ts`
 
 ---
 

@@ -25,6 +25,14 @@ import { handleSearchSops, searchSopsSchema } from './primitives/search-sops.js'
 import { handleSetDisposition, setDispositionSchema } from './primitives/set-disposition.js'
 import { handleStoreMemory, storeMemorySchema } from './primitives/store-memory.js'
 import { handleStoreThought, storeThoughtSchema } from './primitives/store-thought.js'
+import { handleCreateProject, createProjectSchema } from './utilities/create-project.js'
+import { handleUpdateProject, updateProjectSchema } from './utilities/update-project.js'
+import { handleQueryProjects, queryProjectsSchema } from './utilities/query-projects.js'
+import { handleGetProjectBoard, getProjectBoardSchema } from './utilities/get-project-board.js'
+import { handleCreateTask, createTaskSchema } from './utilities/create-task.js'
+import { handleUpdateTask, updateTaskSchema } from './utilities/update-task.js'
+import { handleQueryTasks, queryTasksSchema } from './utilities/query-tasks.js'
+import { handleAdvanceSprint, advanceSprintSchema } from './utilities/advance-sprint.js'
 
 await connectDb()           // Step 2
 await checkFingerprint()    // Step 3
@@ -83,6 +91,53 @@ server.registerTool('get_disposition', { inputSchema: getDispositionSchema.shape
 // search_sops — read
 server.registerTool('search_sops', { inputSchema: searchSopsSchema.shape }, async (args) => ({
   content: [{ type: 'text' as const, text: JSON.stringify(await handleSearchSops(args)) }],
+}))
+
+// ---------------------------------------------------------------------------
+// Coordination Utility registrations (migration 002 — ARCH-010)
+//
+// All write utilities receive agentSlug as their second argument.
+// All read utilities that scope results to the calling agent also receive agentSlug.
+// ---------------------------------------------------------------------------
+
+// create_project — write, requires agentSlug (SEC-21)
+server.registerTool('create_project', { inputSchema: createProjectSchema.shape }, async (args) => ({
+  content: [{ type: 'text' as const, text: JSON.stringify(await handleCreateProject(args, agentSlug)) }],
+}))
+
+// update_project — write, requires agentSlug (SEC-21)
+server.registerTool('update_project', { inputSchema: updateProjectSchema.shape }, async (args) => ({
+  content: [{ type: 'text' as const, text: JSON.stringify(await handleUpdateProject(args, agentSlug)) }],
+}))
+
+// query_projects — read
+server.registerTool('query_projects', { inputSchema: queryProjectsSchema.shape }, async (args) => ({
+  content: [{ type: 'text' as const, text: JSON.stringify(await handleQueryProjects(args)) }],
+}))
+
+// get_project_board — read, requires agentSlug for scope filter (SEC-24)
+server.registerTool('get_project_board', { inputSchema: getProjectBoardSchema.shape }, async (args) => ({
+  content: [{ type: 'text' as const, text: JSON.stringify(await handleGetProjectBoard(args, agentSlug)) }],
+}))
+
+// create_task — write, requires agentSlug (SEC-21 pre-flight ownership check)
+server.registerTool('create_task', { inputSchema: createTaskSchema.shape }, async (args) => ({
+  content: [{ type: 'text' as const, text: JSON.stringify(await handleCreateTask(args, agentSlug)) }],
+}))
+
+// update_task — write, requires agentSlug (SEC-21 ownership in WHERE clause)
+server.registerTool('update_task', { inputSchema: updateTaskSchema.shape }, async (args) => ({
+  content: [{ type: 'text' as const, text: JSON.stringify(await handleUpdateTask(args, agentSlug)) }],
+}))
+
+// query_tasks — read, requires agentSlug for implicit project scope guard
+server.registerTool('query_tasks', { inputSchema: queryTasksSchema.shape }, async (args) => ({
+  content: [{ type: 'text' as const, text: JSON.stringify(await handleQueryTasks(args, agentSlug)) }],
+}))
+
+// advance_sprint — write, requires agentSlug (SEC-21 + SEC-23)
+server.registerTool('advance_sprint', { inputSchema: advanceSprintSchema.shape }, async (args) => ({
+  content: [{ type: 'text' as const, text: JSON.stringify(await handleAdvanceSprint(args, agentSlug)) }],
 }))
 
 const transport = new StdioServerTransport()
