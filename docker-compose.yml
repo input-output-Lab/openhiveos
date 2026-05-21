@@ -1,0 +1,98 @@
+# OpenHiveOS — Local Squad Setup
+#
+# Spins up PostgreSQL + pgvector and the OpenHiveOS MCP server
+# for local development and self-hosted use.
+#
+# Usage:
+#   cp .env.example .env        # fill in POSTGRES_PASSWORD and GEMINI_API_KEY
+#   docker compose up -d        # first run applies the schema automatically
+#
+# The MCP server communicates via stdio. Connect your MCP client by
+# running: docker compose exec -i mcp node dist/index.js
+#
+# The health endpoint is available at http://localhost:${HEALTH_PORT:-3000}
+
+name: openhiveos
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # PostgreSQL 17 + pgvector
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: pgvector/pgvector:pg17
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: openhiveos
+      POSTGRES_USER: openhiveos
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U openhiveos -d openhiveos"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  # ---------------------------------------------------------------------------
+  # Migration runner — idempotent, checks schema before applying
+  # ---------------------------------------------------------------------------
+  migrate:
+    image: pgvector/pgvector:pg17
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - ./migrations:/migrations:ro
+    # Check whether the `agents` table already exists before running.
+    # This guards against re-running CREATE TABLE statements that would fail.
+    command: >
+      bash -c "
+        APPLIED=$(psql -h postgres -U openhiveos -d openhiveos -tAc
+          \"SELECT 1 FROM pg_tables WHERE schemaname='public' AND tablename='agents'\")
+        if [ \"$$APPLIED\" = '1' ]; then
+          echo '[migrate] Schema already applied — skipping'
+        else
+          echo '[migrate] Applying 001_init.sql...'
+          psql -h postgres -U openhiveos -d openhiveos -f /migrations/001_init.sql
+          echo '[migrate] Done'
+        fi
+      "
+    restart: "no"
+
+  # ---------------------------------------------------------------------------
+  # OpenHiveOS MCP server
+  # ---------------------------------------------------------------------------
+  mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    stdin_open: true  # Required: keeps stdin open for StdioServerTransport
+    environment:
+      DATABASE_URL: postgresql://openhiveos:${POSTGRES_PASSWORD}@postgres:5432/openhiveos
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      HEALTH_PORT: ${HEALTH_PORT:-3000}
+    ports:
+      - "${HEALTH_PORT:-3000}:3000"
+    volumes:
+      # Mount your Squad's agent roster — override the image default
+      - ./squad.manifest.json:/app/squad.manifest.json:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:3000 | grep -q '\"status\":\"ok\"'"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  postgres_data:

@@ -1,0 +1,16 @@
+.git
+.github
+node_modules
+dist
+.env
+.env.*
+!.env.example
+docs
+*.md
+!README.md
+.pre-commit-config.yaml
+.nvmrc
+eslint.config.js
+tsconfig.json
+public
+docker-compose*.yml
