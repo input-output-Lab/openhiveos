@@ -1,0 +1,11 @@
+#!/usr/bin/env sh
+# OpenHiveOS — pre-commit hook (SEC-15 local gate)
+#
+# Fast checks only — full test suite runs in CI.
+# Secret scanning is handled by .pre-commit-config.yaml (gitleaks).
+
+# Lint all staged TypeScript files
+npm run lint
+
+# Type-check (noEmit — catches type errors before push)
+npm run typecheck

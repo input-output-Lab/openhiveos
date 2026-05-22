@@ -1,7 +1,7 @@
 # -----------------------------------------------------------------------
 # Stage 1 — build
 # -----------------------------------------------------------------------
-FROM node:20-slim AS build
+FROM node:22-alpine AS build
 
 WORKDIR /app
 
@@ -15,7 +15,7 @@ RUN npm run build
 # -----------------------------------------------------------------------
 # Stage 2 — production
 # -----------------------------------------------------------------------
-FROM node:20-slim AS production
+FROM node:22-alpine AS production
 
 WORKDIR /app
 

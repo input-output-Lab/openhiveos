@@ -1,0 +1,18 @@
+# OpenHiveOS — Trivy ignore file (SEC-8)
+#
+# SEC-8 policy:
+#   CRITICAL: 0 (no CRITICAL CVEs allowed — CI exits 1 on any CRITICAL)
+#   HIGH:     managed — entries in this file must have a per-CVE justification
+#             comment explaining why the CVE is acceptable and the review date.
+#
+# Format: <CVE-ID>  # <justification> | reviewed: <date> | next-review: <date>
+#
+# Instructions for adding an entry:
+#   1. Confirm no fix is available (trivy reports "fixed: N/A")
+#   2. Assess actual exploitability in the OpenHiveOS threat model
+#   3. Add entry with required comment fields
+#   4. Schedule next-review within 90 days
+#   5. Locksmith signs off before merge (SEC-7 gate)
+#
+# BLANK FILE — no CVEs are currently suppressed.
+# When the first unfixed HIGH CVE is identified, add it here with full comment.

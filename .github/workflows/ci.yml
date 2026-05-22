@@ -1,4 +1,4 @@
-# CI — Lint & Type-check + Migration validation
+# CI — Lint & Type-check + Migration validation + Container security scan
 # Runs on every push and PR targeting main.
 # All jobs must pass before merge is permitted (SEC-14 required status checks).
 
@@ -195,3 +195,42 @@ jobs:
             exit 1
           fi
           echo "Views OK — v_cost_by_agent_month, v_cost_by_project_month, v_cost_by_task present"
+
+  # -------------------------------------------------------------------------
+  # Container security scan — Trivy (SEC-8)
+  # SEC-8 thresholds: CRITICAL: 0, HIGH: managed .trivyignore (per-CVE comments)
+  # Unfixed CVEs: skipped via --ignore-unfixed.
+  # Known HIGH CVEs with no fix: documented in .trivyignore with justification.
+  # -------------------------------------------------------------------------
+  container-scan:
+    name: Container security scan (Trivy)
+    runs-on: ubuntu-latest
+    needs: lint-and-typecheck
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build image for scanning
+        run: docker build --target production -t openhiveos:ci-scan .
+
+      - name: Run Trivy — CRITICAL exit on any finding (SEC-8)
+        uses: aquasecurity/trivy-action@0.30.0
+        with:
+          image-ref: openhiveos:ci-scan
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: CRITICAL
+          trivyignore-file: .trivyignore
+
+      - name: Run Trivy — HIGH findings summary (informational, no exit)
+        uses: aquasecurity/trivy-action@0.30.0
+        with:
+          image-ref: openhiveos:ci-scan
+          format: table
+          exit-code: '0'
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: HIGH
+          trivyignore-file: .trivyignore
