@@ -32,7 +32,7 @@
 // Load .env before anything that reads env vars at init time
 import 'dotenv/config'
 
-import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
+import { createHash, createHmac } from 'node:crypto'
 import { writeFile, rename, mkdir } from 'node:fs/promises'
 import { createInterface } from 'node:readline'
 import { dirname, resolve } from 'node:path'
@@ -112,13 +112,6 @@ function computePayloadHash(payload: EthosSealPayload): string {
   return createHash('sha256').update(canonicalise(payload)).digest('hex')
 }
 
-function verifyHmac(record: EthosSealRecord): boolean {
-  const expected = Buffer.from(computeHmac(record.payload), 'hex')
-  const actual = Buffer.from(record.hmac, 'hex')
-  if (expected.length !== actual.length) return false
-  return timingSafeEqual(expected, actual)
-}
-
 // ---------------------------------------------------------------------------
 // Atomic file export
 // Writes to a temp file then renames — rename is atomic on POSIX systems.
@@ -192,7 +185,7 @@ async function withSerializableRetry(
         (err as { code: string }).code === SERIALIZATION_FAILURE
 
       if (isSerializationFailure && attempt < maxRetries) {
-        console.warn(`[one-init] Serialization conflict on attempt ${attempt} — retrying...`)
+        console.warn(`[one-init] Serialization conflict on attempt ${String(attempt)} — retrying...`)
         continue
       }
 

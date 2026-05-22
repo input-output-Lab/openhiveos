@@ -14,7 +14,7 @@
 import './config.js' // Step 1: validate env immediately — throws on missing vars
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
-import { connectDb } from './db/client.js'
+import { connectDb, pool } from './db/client.js'
 import { checkFingerprint } from './db/fingerprint.js'
 import { checkEthosSeal } from './db/ethos-seal.js'
 import { startHealthServer } from './health.js'
@@ -40,6 +40,8 @@ import { handleCreateCron, createCronSchema } from './utilities/create-cron.js'
 import { handleUpdateCron, updateCronSchema } from './utilities/update-cron.js'
 import { handleQueryCrons, queryCronsSchema } from './utilities/query-crons.js'
 import { handleDeleteCron, deleteCronSchema } from './utilities/delete-cron.js'
+import { CronWorker } from './workers/cron.worker.js'
+import { ToolDispatcher } from './workers/tool-dispatcher.js'
 
 await connectDb()           // Step 2
 await checkFingerprint()    // Step 3
@@ -188,3 +190,11 @@ server.registerTool('create_cron', { inputSchema: createCronSchema.shape }, asyn
 
 const transport = new StdioServerTransport()
 await server.connect(transport) // Step 6
+
+// Step 7: Start cron worker (ARCH-011 G2)
+// Dispatcher starts with an empty handler map — handlers are registered as
+// tool implementations are added. The architecture is in place; Scout's G2
+// tests will verify the poll loop and double-fire guard with a test dispatcher.
+const dispatcher = new ToolDispatcher(pool, new Map())
+const worker = new CronWorker(pool, dispatcher)
+worker.start()

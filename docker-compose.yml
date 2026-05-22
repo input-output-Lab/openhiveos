@@ -250,5 +250,78 @@ services:
       # PROVISION_ENV_DIR must exist on the host before running.
       - ${PROVISION_ENV_DIR:-./provision}:/provision:rw
 
+  # ---------------------------------------------------------------------------
+  # MCP Gateway — Stage 6 of canonical operator onboarding (ARCH-016)
+  #
+  # Exposes the MCP stdio server as an SSE endpoint for external Bridge
+  # integrations (nova-telegram-bridge, openBridge). Runs under the
+  # `integration` Compose profile — not started by default.
+  #
+  # Activation: docker compose --profile integration up -d openhiveos-mcp-gateway
+  #
+  # Topology A (loopback): Bridge connects via http://127.0.0.1:${MCP_GATEWAY_PORT:-3006}
+  # Topology B (Compose co-deploy): Bridge connects via http://openhiveos-mcp-gateway:3006
+  #
+  # SEC-D1/D2: MCP_GATEWAY_TOKEN auth — timingSafeEqual, 64 hex chars min
+  # SEC-D3: ?token= redacted from logs before SSE upgrade (gateway application layer)
+  # SEC-D4: ports binds to 127.0.0.1 only — never 0.0.0.0 (v1.1 amendment)
+  # SEC-D5: MCP_GATEWAY_TOKEN registered in gitleaks.toml
+  # SEC-D6: one AGENT_TOKEN = one agent identity (nova is the agent)
+  # SEC-D7: HEALTH_PORT=3007 (distinct from standalone mcp container port 3000)
+  # SEC-D8: gateway blocks SSE until subprocess listTools() succeeds
+  # SEC-D9: rate limit 10 SSE connections/min (express-rate-limit in gateway)
+  # SEC-D10: env vars scoped — OPENHIVEOS_INGESTION_TOKEN is NOT included
+  # ---------------------------------------------------------------------------
+  openhiveos-mcp-gateway:
+    build:
+      context: .
+      dockerfile: packages/mcp-gateway/Dockerfile
+      args:
+        # Pin MCP server version at build time — must match standalone mcp container.
+        # CI/CD updates this ARG on every mcp-server binary change to prevent drift.
+        MCP_VERSION: "0.2.0"
+    profiles: ["integration"]
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgresql://openhiveos:${POSTGRES_PASSWORD}@postgres:5432/openhiveos # gitleaks:allow
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      AGENT_TOKEN: ${AGENT_TOKEN}
+      # SEC-D1/D2: authentication token for Bridge SSE connections (64 hex chars)
+      MCP_GATEWAY_TOKEN: ${MCP_GATEWAY_TOKEN}
+      # SEC-D4: internal SSE port — host-bound to 127.0.0.1 below
+      MCP_GATEWAY_PORT: ${MCP_GATEWAY_PORT:-3006}
+      # SEC-D7: subprocess health port — must differ from standalone mcp (3000)
+      HEALTH_PORT: ${GATEWAY_HEALTH_PORT:-3007}
+      # Path to the MCP server binary inside the container (mounted via volume below)
+      MCP_BINARY_PATH: /mcp-server/index.js
+      # Ethos Seal — same path convention as standalone mcp container
+      ETHOS_SEAL_PATH: /ethos-seal/ethos.seal.json
+    ports:
+      # SEC-D4 (v1.1): 127.0.0.1 loopback binding — never 0.0.0.0.
+      # PM2/systemd consumers connect via http://127.0.0.1:${MCP_GATEWAY_PORT:-3006}
+      - "127.0.0.1:${MCP_GATEWAY_PORT:-3006}:3006"
+    volumes:
+      # MCP server binary — built from the main Dockerfile production target.
+      # Run `docker compose build mcp` before starting the gateway to ensure dist/ is current.
+      - ./dist:/mcp-server:ro
+      # Agent roster — same manifest as standalone mcp container
+      - ./squad.manifest.json:/app/squad.manifest.json:ro
+      # Ethos Seal — read-only at runtime. Written by one-init (init profile).
+      - ${ETHOS_SEAL_DIR:-./ethos-seal}:/ethos-seal:ro
+    healthcheck:
+      # Two-layer check: HTTP GET /health reflects subprocess readiness (SEC-D8).
+      # Layer 1 — HTTP endpoint returns 200 only after listTools() succeeds.
+      # Layer 2 — wget exit code propagates subprocess liveness to Compose.
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:${MCP_GATEWAY_PORT:-3006}/health 2>/dev/null | grep -q '\"status\":\"ok\"'"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
 volumes:
   postgres_data:

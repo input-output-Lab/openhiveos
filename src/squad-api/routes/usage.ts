@@ -154,7 +154,7 @@ usageRouter.get('/agents/:name', async (req, res) => {
  */
 usageRouter.get('/tasks/:id', async (req, res) => {
   const rawId = req.params['id']
-  const taskId = parseInt(rawId ?? '', 10)
+  const taskId = parseInt(rawId, 10)
 
   if (!Number.isInteger(taskId) || taskId <= 0) {
     res.status(400).json({ error: 'Task ID must be a positive integer' })
@@ -167,7 +167,7 @@ usageRouter.get('/tasks/:id', async (req, res) => {
   })
 
   if (rows.length === 0) {
-    res.status(404).json({ error: `No usage data found for task ${taskId}` })
+    res.status(404).json({ error: `No usage data found for task ${String(taskId)}` })
     return
   }
 

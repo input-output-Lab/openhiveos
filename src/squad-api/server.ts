@@ -117,7 +117,7 @@ export function createSquadApiApp(): express.Application {
   // Falls back to a plain-text 404 if the dashboard has not been built yet.
   // ---------------------------------------------------------------------------
   app.get('*', (_req, res) => {
-    res.sendFile(join(dashboardPath, 'index.html'), (err) => {
+    res.sendFile(join(dashboardPath, 'index.html'), (err: Error | undefined) => {
       if (err) {
         res.status(404).send('Dashboard not built. Run: npm run build:all')
       }

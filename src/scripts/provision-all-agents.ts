@@ -190,7 +190,7 @@ try {
     process.exit(1)
   }
 
-  console.log(`[provision-all] Provisioning ${agentsToProvision.length} agent(s)...`)
+  console.log(`[provision-all] Provisioning ${String(agentsToProvision.length)} agent(s)...`)
   if (forceRotate) {
     console.log('[provision-all] Mode: --force-rotate (all tokens will be rotated)')
   } else {
@@ -244,7 +244,7 @@ try {
   console.log(`  Skipped:     ${skipped.join(', ') || 'none'}`)
   console.log('')
   if (skipped.length > 0) {
-    console.log(`[provision-all] Note: ${skipped.length} agent(s) skipped (already provisioned).`)
+    console.log(`[provision-all] Note: ${String(skipped.length)} agent(s) skipped (already provisioned).`)
     console.log('[provision-all] Their tokens are NOT in the output file.')
     console.log('[provision-all] To rotate: --force-rotate --confirm')
   }
