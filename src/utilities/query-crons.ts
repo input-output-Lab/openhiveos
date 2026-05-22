@@ -8,9 +8,15 @@ import { queryCrons, ALLOWED_CRON_FILTERS } from '../db/queries/crons.js'
 // from the whitelist, so unknown filter keys produce a Zod parse error before
 // any SQL is constructed. Error does not leak column names.
 //
-// Cross-agent enumeration gap: documented in ARCH-011 Tech Debt #2.
-// Callers may filter by owner_agent_slug to scope to their own crons.
-// Full caller-scoping deferred to post-v0.1.
+// NOTE: The MCP SDK (v1.11.0) does not validate or strip handler inputs — it
+// uses .shape for JSON Schema generation only. Without .strict(), Zod's default
+// behaviour silently discards unknown keys rather than surfacing a caller error.
+// .strict() makes the rejection explicit and consistent with all mutation schemas.
+//
+// Read visibility model: squad-visible reads (Option B, decided 2026-05-21).
+// Any agent may query any agent's crons — this is the deliberate squad
+// coordination model per ARCH-006. Ownership is enforced on all writes via
+// WHERE owner_agent_slug = $callerSlug (SEC-29). See ARCH-011 Tech Debt #2.
 //
 // Soft-delete default: deleted crons are hidden unless status='deleted' is passed.
 // ---------------------------------------------------------------------------
@@ -19,7 +25,7 @@ export const queryCronsSchema = z.object({
   project_id:       z.number().int().positive().optional(),
   status:           z.enum(['active', 'paused', 'deleted']).optional(),
   owner_agent_slug: z.string().min(1).max(100).optional(),
-})
+}).strict()
 
 // Compile-time check: every key in ALLOWED_CRON_FILTERS must appear in the schema (SEC-30).
 // If this fails, a filter key was added to ALLOWED_CRON_FILTERS without a matching Zod field.
