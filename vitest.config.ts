@@ -25,11 +25,19 @@ export default defineConfig({
         'src/scripts/**',
         'src/**/*.d.ts',
       ],
-      // Thresholds are scoped to the workers module — the only module with active
-      // test coverage after Sprint 6 (G2). Thresholds will expand sprint-by-sprint
-      // as the Coverage Debt register is worked down. See scout coverage-debt notes.
+      // Thresholds are scoped per module tier and expanded sprint-by-sprint as
+      // the Coverage Debt register is worked down (S7-07 + S7-08 expansion).
+      // See scout coverage-debt notes.
       thresholds: {
         'src/workers/**': {
+          lines: 85,
+          branches: 65,
+        },
+        'src/db/queries/**': {
+          lines: 85,
+          branches: 65,
+        },
+        'src/utilities/**': {
           lines: 85,
           branches: 65,
         },
