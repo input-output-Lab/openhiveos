@@ -338,26 +338,31 @@ The handler must verify that `project_id` references a project owned by the call
 
 ### 6. `update_task`
 
+**Model C — hybrid permission (decided 2026-05-21, Sprint 7):**
+- Project **owner**: may update ALL fields on any task in their project.
+- **Assignee**: may update the `status` field ONLY on tasks assigned to them, regardless of project ownership.
+
+The handler computes `allowAssigneePath = true` when the request contains `status` and no owner-only fields (title / description / unassign / assignee_agent_slug / github_pr_url / notes). The DB enforces the row gate; the handler enforces the field gate. Both must hold.
+
 ```sql
 UPDATE tasks
-SET    status              = COALESCE($3, status),
-       assignee_agent_slug = COALESCE($4, assignee_agent_slug),
-       github_pr_url       = COALESCE($5, github_pr_url),
-       notes               = COALESCE($6, notes),
-       title               = COALESCE($7, title),
-       description         = COALESCE($8, description)
-WHERE  id         = $1
-AND    project_id IN (
-         SELECT id
-         FROM   projects
-         WHERE  owner_agent_slug = $2
+SET    title               = COALESCE($3, title),
+       description         = COALESCE($4, description),
+       status              = COALESCE($5, status),
+       assignee_agent_slug = CASE WHEN $6 THEN NULL ELSE COALESCE($7, assignee_agent_slug) END,
+       github_pr_url       = COALESCE($8, github_pr_url),
+       notes               = COALESCE($9, notes)
+WHERE  id = $1
+  AND  (
+         project_id IN (SELECT id FROM projects WHERE owner_agent_slug = $2)
+         OR ($10 AND assignee_agent_slug = $2)
        )
 RETURNING *;
 ```
 
-`$1` = task `id`, `$2` = `owner_agent_slug` injected server-side from bearer identity (SEC-21). Authorization is enforced by the subquery: if the task's parent project is not owned by the caller, the WHERE predicate returns zero rows. Zero-row result is returned as a 404. The caller cannot distinguish "not found" from "not authorized" (enumeration protection).
+`$1` = task `id`, `$2` = `owner_agent_slug` (server-injected, SEC-21), `$6` = `unassign` flag, `$10` = `allowAssigneePath` (handler-computed). Zero-row result surfaces as `not_found_or_unauthorized`. The caller cannot distinguish "not found", "not owned", or "not assigned" — enumeration protection preserved.
 
-See Technical Debt item 2 for the deferred assignee-self-update permission model.
+Technical Debt item 2 is **closed** as of Sprint 7.
 
 ---
 
@@ -403,7 +408,7 @@ COMMIT;
 
 `projects.owner_agent_slug TEXT NOT NULL REFERENCES agents(slug)` is the ownership anchor for the project resource. All mutating utilities (`update_project`, `update_task`, `create_task`) enforce authorization by matching the server-injected caller identity against this column. The `owner_agent_slug` value is never accepted from the caller payload — it is always taken from the bearer token identity resolved by `src/auth/identity.ts`.
 
-`tasks.assignee_agent_slug TEXT REFERENCES agents(slug)` is a nullable attribution column, not an ownership anchor. An assignee has no write privileges beyond what the project owner has granted in the current model (see Technical Debt item 2).
+`tasks.assignee_agent_slug TEXT REFERENCES agents(slug)` is a nullable attribution column, not an ownership anchor. Under Model C (Sprint 7): an assignee may update the `status` field only on tasks assigned to them. All other fields remain owner-only. See the `update_task` section above.
 
 ### SEC-22 — `projects.slug` input validation
 
@@ -433,7 +438,7 @@ Filter keys not in the whitelist are rejected with an HTTP 400 before reaching t
 | # | Item | Business Cost | Remediation Cost | Remediation Sprint | Owner |
 |---|---|---|---|---|---|
 | 1 | **Sprint history query** — `sprints` table captures history by row; no `query_sprints` utility ships in Sprint 3. Agents cannot programmatically retrieve past sprint goals or dates via MCP. | Low: sprint history is available via direct DB inspection; no agent-facing workflow currently depends on it. | 2–3 dev-days: implement `query_sprints` utility handler, register MCP tool, add integration test. | Sprint 4 | Murphy (handler), Silas (query review) |
-| 2 | **`update_task` authorization scope** — authorization checks project ownership only. An assignee cannot update their own task without being the project owner. A future permission model (assignee-self-update, team roles) is not implemented. | Low-Medium: current squad operates with ownership == write access, which is sufficient at current scale. Will become friction if the product is used by multi-owner teams. | 4–6 dev-days: design and implement a `task_permissions` model or an `allowed_agents` join table; update `update_task` query contract; threat-model review by Locksmith. | Sprint 4–5 | Silas (design), Murphy (implementation) |
+| 2 | **`update_task` authorization scope** — ~~authorization checks project ownership only~~ **RESOLVED Sprint 7 (2026-05-21).** Model C hybrid permission implemented: project owner may update all fields; assignee may update `status` only. WHERE clause extended with `OR ($allowAssigneePath AND assignee_agent_slug = $callerSlug)`. Handler enforces field gate before DB call. Nova ruling: CLEAR — timing oracle risk NONE (assignments already visible via `query_tasks`). Locksmith soft gate in PR. | — | — | Sprint 7 ✅ | Murphy |
 | 3 | **`projects.status` enum is migration-locked** — adding a new project status (e.g., `'paused'`) requires an `ALTER TABLE projects DROP CONSTRAINT chk_projects_status` followed by a new `ADD CONSTRAINT`. The two-value enum (`active`, `archived`) is deliberately minimal for Sprint 3. | Low: no stakeholder has requested additional statuses. Risk is schema churn if product direction shifts. | 1 dev-day: write migration, update Zod schema, update query whitelist if status becomes a filter value. | On-demand | Murphy (migration), Silas (review) |
 
 ---
