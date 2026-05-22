@@ -59,8 +59,17 @@ export async function createTask(params: {
 // ---------------------------------------------------------------------------
 // updateTask
 // SEC-21: ownership check embedded in WHERE — project must be owned by the
-// requesting agent. Returns undefined if task does not exist or agent does
-// not own the parent project.
+// requesting agent. Returns undefined if task does not exist or agent is
+// not authorized.
+//
+// Model C (decided 2026-05-21): hybrid permission.
+//   - Project owner: may update ALL fields on any task in their project.
+//   - Assignee: may update the `status` field ONLY on tasks assigned to them,
+//     regardless of project ownership.
+//
+// The allowAssigneePath flag is set by the handler when the request contains
+// only status — no owner-only fields. The DB enforces the row gate; the
+// handler enforces the field gate. Both must hold.
 //
 // assignee handling: pass unassign=true to clear the assignee to NULL.
 // Pass a slug to set a new assignee. Pass neither to leave unchanged.
@@ -76,6 +85,7 @@ export async function updateTask(params: {
   assignee_agent_slug?: string
   github_pr_url?: string
   notes?: string
+  allowAssigneePath?: boolean
 }): Promise<Task | undefined> {
   const result = await pool.query<Task>(
     `UPDATE tasks
@@ -89,7 +99,10 @@ export async function updateTask(params: {
          github_pr_url       = COALESCE($8, github_pr_url),
          notes               = COALESCE($9, notes)
      WHERE id = $1
-       AND project_id IN (SELECT id FROM projects WHERE owner_agent_slug = $2)
+       AND (
+         project_id IN (SELECT id FROM projects WHERE owner_agent_slug = $2)
+         OR ($10 AND assignee_agent_slug = $2)
+       )
      RETURNING id, project_id, title, description, status, assignee_agent_slug,
                github_pr_url, notes, created_at, updated_at`,
     [
@@ -102,6 +115,7 @@ export async function updateTask(params: {
       params.assignee_agent_slug ?? null,
       params.github_pr_url ?? null,
       params.notes ?? null,
+      params.allowAssigneePath ?? false,
     ],
   )
   return result.rows[0]

@@ -106,9 +106,12 @@ export async function createCron(params: {
 // reach the SQL template. All values are parameterised ($N). Unknown filter
 // keys are rejected at the Zod layer before this function is called.
 //
-// Cross-agent enumeration gap: query_crons does not enforce caller-scoping.
-// An agent may query any agent's crons by passing owner_agent_slug explicitly.
-// This gap is documented in ARCH-011 Tech Debt #2 and deferred to post-v0.1.
+// Read visibility model: squad-visible reads (Option B, decided 2026-05-21).
+// Any agent may query any agent's crons — this is the deliberate squad
+// coordination model per ARCH-006. Ownership is enforced on all writes
+// (createCron, updateCron, deleteCron) via WHERE owner_agent_slug = $callerSlug
+// (SEC-29). Caller-scoped reads were formally evaluated and rejected;
+// Option B is the final architectural decision. See ARCH-011 Tech Debt #2.
 // ---------------------------------------------------------------------------
 
 export async function queryCrons(filters: CronFilterValues): Promise<Cron[]> {
