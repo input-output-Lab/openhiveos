@@ -195,3 +195,40 @@ jobs:
             exit 1
           fi
           echo "Views OK — v_cost_by_agent_month, v_cost_by_project_month, v_cost_by_task present"
+
+      # -----------------------------------------------------------------
+      # Migration 006 — Cron worker: next_fire_at (ARCH-011 G1 / S7-05)
+      # -----------------------------------------------------------------
+
+      - name: Apply migration 006 — Cron next_fire_at column
+        run: psql -f migrations/006_cron_next_fire_at.sql
+
+      - name: Verify migration 006 — next_fire_at column present on crons
+        run: |
+          COL=$(psql -t -A -c "
+            SELECT COUNT(*)
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name   = 'crons'
+              AND column_name  = 'next_fire_at'
+          ")
+          if [ "$COL" -ne 1 ]; then
+            echo "::error::Migration 006 incomplete — crons.next_fire_at column missing"
+            exit 1
+          fi
+          echo "Column OK — crons.next_fire_at present"
+
+      - name: Verify migration 006 — idx_crons_next_fire index present
+        run: |
+          IDX=$(psql -t -A -c "
+            SELECT COUNT(*)
+            FROM pg_indexes
+            WHERE schemaname = 'public'
+              AND tablename  = 'crons'
+              AND indexname  = 'idx_crons_next_fire'
+          ")
+          if [ "$IDX" -ne 1 ]; then
+            echo "::error::Migration 006 incomplete — idx_crons_next_fire index missing"
+            exit 1
+          fi
+          echo "Index OK — idx_crons_next_fire present"
