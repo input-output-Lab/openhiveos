@@ -1,4 +1,5 @@
 import { pool } from '../client.js'
+import type { PoolClient } from 'pg'
 import type { Cron, CronStatus } from '../../types.js'
 
 // ---------------------------------------------------------------------------
@@ -242,4 +243,74 @@ export async function deleteCron(params: {
   const row = result.rows[0]
   if (!row) throw new Error('[db] UPDATE crons (delete) returned no row')
   return { kind: 'success', cron: row }
+}
+
+// ---------------------------------------------------------------------------
+// Cron Worker query contracts (ARCH-011 G1/G2 — Sprint 6)
+//
+// These functions are distinct from the registration-layer queries above:
+//   - They accept injected pool/client so the cron worker is testable in
+//     isolation against a testcontainers Postgres instance.
+//   - getDueCrons runs in autocommit — it returns candidates, not a durable lock.
+//   - markCronFired accepts a PoolClient already inside a BEGIN transaction.
+//     The caller (CronWorker.fire) holds the FOR UPDATE SKIP LOCKED row lock
+//     and commits after this call succeeds.
+//
+// Column name: last_run_at (NOT last_fired_at — Silas correction, 2026-05-21)
+// ---------------------------------------------------------------------------
+
+/**
+ * The minimal shape returned by getDueCrons. The worker only needs these fields.
+ * Keeping it narrow reduces SELECT surface and makes test fixtures smaller.
+ */
+export interface DueCron {
+  id: number
+  schedule: string
+  tool_name: string
+  payload: Record<string, unknown> | null
+}
+
+/**
+ * getDueCrons — returns active crons whose next_fire_at is in the past.
+ *
+ * Runs in autocommit. Returns candidates for the poll cycle.
+ * Does NOT hold a row lock — the per-cron lock is acquired inside markCronFired.
+ *
+ * Requires pool parameter (injected) for testability with testcontainers.
+ *
+ * Migration gate: next_fire_at column must exist (migration 006_cron_next_fire_at.sql).
+ */
+export async function getDueCrons(injectedPool: typeof pool): Promise<DueCron[]> {
+  const result = await injectedPool.query<DueCron>(
+    `SELECT id, schedule, tool_name, payload
+     FROM crons
+     WHERE status = 'active'
+       AND next_fire_at <= NOW()`,
+  )
+  return result.rows
+}
+
+/**
+ * markCronFired — updates last_run_at and next_fire_at inside a transaction.
+ *
+ * MUST be called inside an open transaction. The caller holds a
+ * FOR UPDATE SKIP LOCKED lock on this row. This function does not BEGIN,
+ * COMMIT, or ROLLBACK — that is the caller's responsibility.
+ *
+ * @param client  - PoolClient with an open transaction (BEGIN already called)
+ * @param id      - cron row ID (row is already locked by the caller)
+ * @param nextFireAt - pre-computed next tick via cron-parser (UTC)
+ */
+export async function markCronFired(
+  client: PoolClient,
+  id: number,
+  nextFireAt: Date,
+): Promise<void> {
+  await client.query(
+    `UPDATE crons
+     SET last_run_at  = NOW(),
+         next_fire_at = $2
+     WHERE id = $1`,
+    [id, nextFireAt],
+  )
 }

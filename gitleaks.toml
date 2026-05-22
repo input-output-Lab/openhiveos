@@ -59,6 +59,16 @@ description = "PostgreSQL connection string with embedded password"
 regex = '''postgres(?:ql)?://[^:@\s"']+:[^@\s"']+@'''
 tags = ["database", "credentials", "sec-19"]
 
+  [rules.allowlist]
+  description = "Test placeholder connection strings (no real credentials)"
+  regexes = [
+    # vitest.config.ts uses 'test:test@localhost' as a MODULE-LOAD-TIME placeholder
+    # to satisfy the DATABASE_URL guard in src/db/client.ts during unit tests.
+    # testcontainers provides the real ephemeral DB — this string never connects.
+    # The allowlist regex matches the captured secret (full rule match): postgresql://test:test@
+    '''postgresql://test:test@''',
+  ]
+
 # ---------------------------------------------------------------------------
 # Custom Rule 3 — Google Gemini / Generative AI API key
 #
@@ -92,4 +102,27 @@ tags = ["openhiveos", "api-token", "sec-c7", "arch-015"]
   regexes = [
     # .env.example has OPENHIVEOS_INGESTION_TOKEN= with no value — not a real token
     '''OPENHIVEOS_INGESTION_TOKEN\s*=\s*$''',
+  ]
+
+# ---------------------------------------------------------------------------
+# Custom Rule 5 — MCP_GATEWAY_TOKEN
+#
+# Format: 64 lowercase hex characters (32 bytes CSPRNG — SEC-D2, ARCH-016).
+# A committed token would allow any caller to connect to the mcp-gateway SSE
+# endpoint and issue MCP tool calls without authorisation.
+#
+# Pattern targets the env var assignment form to avoid false-positives on
+# arbitrary 64-char hex strings (e.g. SHA-256 hashes in comments/tests).
+# ---------------------------------------------------------------------------
+[[rules]]
+id = "openhiveos-mcp-gateway-token"
+description = "OpenHiveOS MCP_GATEWAY_TOKEN (64 lowercase hex chars)"
+regex = '''MCP_GATEWAY_TOKEN\s*=\s*[0-9a-f]{64}'''
+tags = ["openhiveos", "api-token", "sec-d5", "arch-016"]
+
+  [rules.allowlist]
+  description = "Placeholder entries in example files"
+  regexes = [
+    # .env.example has MCP_GATEWAY_TOKEN= with no value — not a real token
+    '''MCP_GATEWAY_TOKEN\s*=\s*$''',
   ]

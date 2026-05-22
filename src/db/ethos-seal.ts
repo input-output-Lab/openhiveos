@@ -124,6 +124,6 @@ export async function checkEthosSeal(): Promise<void> {
 // ---------------------------------------------------------------------------
 // Type guard for Node.js filesystem errors
 // ---------------------------------------------------------------------------
-function isErrnoException(err: unknown): err is NodeJS.ErrnoException {
+function isErrnoException(err: unknown): err is Error & { code?: string } {
   return err instanceof Error && 'code' in err
 }

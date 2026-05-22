@@ -83,7 +83,7 @@ router.get('/', async (req, res) => {
       ])
 
       return {
-        active: activeResult.rows[0] as ActiveMetaRow | ActiveFullRow | undefined,
+        active: activeResult.rows[0],
         history: historyResult.rows,
       }
     })

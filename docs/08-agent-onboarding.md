@@ -3,8 +3,8 @@
 **Purpose:** Step-by-step procedures for provisioning, rotating, and revoking agent tokens in an OpenHiveOS Squad Instance. Follow this guide every time a new agent joins the Squad or an existing agent's credentials need to be changed.
 
 **Owner:** Clarence  
-**Last updated:** 2026-05-21 (Sprint 5 — ARCH-014, ARCH-015)  
-**Source authority:** ARCH-001, ARCH-013, ARCH-014, ARCH-015
+**Last updated:** 2026-05-21 (Sprint 6 — ARCH-016)  
+**Source authority:** ARCH-001, ARCH-013, ARCH-014, ARCH-015, ARCH-016
 
 ---
 
@@ -16,7 +16,8 @@
 4. [Revoke an agent](#4-revoke-an-agent)
 5. [Verification pattern](#5-verification-pattern)
 6. [Ingestion token (Bridge) — rotation procedure](#6-ingestion-token-bridge--rotation-procedure)
-7. [Troubleshooting](#7-troubleshooting)
+7. [Enable the integration profile (mcp-gateway)](#7-enable-the-integration-profile-mcp-gateway)
+8. [Troubleshooting](#8-troubleshooting)
 
 ---
 
@@ -279,7 +280,141 @@ Until Bridge is deployed and `OPENHIVEOS_INGESTION_URL` is configured, the `llm_
 
 ---
 
-## 7. Troubleshooting
+## 7. Enable the integration profile (mcp-gateway)
+
+> **ARCH-016 — Stage 6 of canonical operator onboarding.** Follow this section when you are connecting a Bridge (e.g. nova-telegram-bridge, openBridge) to the Squad Instance via the SSE integration layer. This is an optional capability — it is not required for the Squad to operate.
+
+The mcp-gateway runs under the `integration` Compose profile. It is not started by `docker compose up -d` unless you explicitly enable it.
+
+### Prerequisites
+
+Before starting, confirm:
+
+- Stages 1–5 are complete (Seal initialised, agents provisioned, squad-api healthy, Bridge connected and sending usage data).
+- The host `.env` file contains values for:
+  - `MCP_GATEWAY_TOKEN` — 64 lowercase hex characters (see Step 1 below)
+  - `MCP_GATEWAY_PORT` — defaults to `3006` if not set
+  - `GATEWAY_HEALTH_PORT` — defaults to `3007` if not set; must differ from the standalone mcp container `HEALTH_PORT` (default `3000`)
+- The main project `dist/` folder exists and is current. The gateway spawns the MCP server binary from this folder as a subprocess. Run `npm run build` (or `docker compose build mcp`) if in doubt.
+
+### Step 1 — Generate the MCP gateway token
+
+This token is the shared secret between the mcp-gateway and any Bridge connecting to it. It must be 64 lowercase hex characters (32 bytes of CSPRNG entropy). This is separate from the Bridge `OPENHIVEOS_INGESTION_TOKEN` — they are two different secrets with different scopes.
+
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
+
+Copy the output. You will need it in the next two steps.
+
+> **Security:** Store this token in 1Password immediately. Never commit it to git. The `gitleaks.toml` rule `openhiveos-mcp-gateway-token` will block the commit if you try — this is intentional.
+
+### Step 2 — Set the token in .env
+
+Add the token to the Squad Instance `.env` file:
+
+```bash
+MCP_GATEWAY_TOKEN=<64-hex-chars-from-step-1>
+MCP_GATEWAY_PORT=3006
+GATEWAY_HEALTH_PORT=3007
+```
+
+If you are running multiple Squad Instances on the same host, each must use a different `MCP_GATEWAY_PORT` and `GATEWAY_HEALTH_PORT` to avoid collisions.
+
+### Step 3 — Set the token in Bridge
+
+Set `MCP_GATEWAY_TOKEN` and `MCP_GATEWAY_URL` in the Bridge's environment. The URL format depends on your topology:
+
+**Topology A — Bridge runs on the same host as the Squad (PM2, systemd, or local process):**
+
+```bash
+MCP_GATEWAY_TOKEN=<same-64-hex-token>
+MCP_GATEWAY_URL=http://127.0.0.1:3006
+```
+
+**Topology B — Bridge runs as a Compose co-deployed container on the same host:**
+
+```bash
+MCP_GATEWAY_TOKEN=<same-64-hex-token>
+MCP_GATEWAY_URL=http://openhiveos-mcp-gateway:3006
+```
+
+In Topology B, `openhiveos-mcp-gateway` is the internal Docker DNS name for the gateway container. Bridge must be in the same Docker network.
+
+### Step 4 — Build the gateway image
+
+```bash
+docker compose build openhiveos-mcp-gateway
+```
+
+The gateway Dockerfile compiles the TypeScript gateway code. This step only needs to be repeated when the gateway source code changes.
+
+### Step 5 — Start the gateway
+
+```bash
+docker compose --profile integration up -d openhiveos-mcp-gateway
+```
+
+The gateway starts and immediately attempts to spawn the MCP server binary as a subprocess. It fetches the tool list to confirm the subprocess is healthy before opening the SSE endpoint.
+
+**Expected startup log:**
+```
+[mcp-gateway] Subprocess ready — SSE endpoint open
+[mcp-gateway] SSE endpoint listening on 127.0.0.1:3006
+```
+
+If the gateway is still initialising, `GET /health` returns `503 {"status":"starting"}`. Once the subprocess is ready, it returns `200 {"status":"ok"}`.
+
+### Step 6 — Restart Bridge
+
+Restart Bridge so it picks up the updated `MCP_GATEWAY_TOKEN` and `MCP_GATEWAY_URL`:
+
+```bash
+pm2 restart nova-telegram-bridge    # Topology A — PM2
+# or
+docker compose restart bridge       # Topology B — Compose co-deploy
+```
+
+### Step 7 — Verify the success signal
+
+The success signal is a confirmed SSE connection in the Bridge logs. Look for:
+
+```
+[mcp-gateway] SSE session established: <session-uuid>
+```
+
+This line is written by the gateway when Bridge successfully authenticates and upgrades to an SSE stream. If you see it, Stage 6 is complete.
+
+**Health check from the host:**
+
+```bash
+curl -s http://127.0.0.1:3006/health
+# Expected: {"status":"ok"}
+```
+
+**Confirm the gateway container health:**
+
+```bash
+docker compose ps openhiveos-mcp-gateway
+# STATUS column should show: healthy
+```
+
+### Token rotation for mcp-gateway
+
+Rotate the `MCP_GATEWAY_TOKEN` using the same pattern as the ingestion token:
+
+1. Generate a new 64-hex token (Step 1 above).
+2. Update `MCP_GATEWAY_TOKEN` in Bridge's environment and restart Bridge.
+3. Update `MCP_GATEWAY_TOKEN` in the Squad Instance `.env` and restart the gateway:
+   ```bash
+   docker compose --profile integration restart openhiveos-mcp-gateway
+   ```
+
+There is no grace window for the gateway token — the old token is invalidated the moment the gateway restarts with the new value. Update Bridge first to keep the connection alive.
+
+---
+
+## 8. Troubleshooting
 
 ### Token not accepted (401 after provisioning)
 
@@ -326,3 +461,67 @@ If it is in the past, the grace window has expired. Provision a fresh token (Sec
 1. Check the manifest: `cat squad.manifest.json | jq '.agents[].slug'`
 2. Confirm the slug matches exactly (case-sensitive, hyphens, no spaces).
 3. If the agent is new, add them to `squad.manifest.json` and rebuild the image (`docker compose build mcp`).
+
+### Gateway container stays `unhealthy`
+
+**Symptom:** `docker compose ps openhiveos-mcp-gateway` shows `health: starting` or `unhealthy` after more than 60 seconds.
+
+**Cause:** The MCP subprocess failed to start. Common causes: `dist/index.js` is missing from the mounted volume, `MCP_BINARY_PATH` is wrong, or the subprocess crashed on boot (missing env var, DB not ready).
+
+**Resolution:**
+1. Check gateway logs for the subprocess error:
+   ```bash
+   docker compose --profile integration logs openhiveos-mcp-gateway --tail=50
+   ```
+2. Confirm the `dist/` folder exists on the host and contains `index.js`:
+   ```bash
+   ls ./dist/index.js
+   ```
+   If missing, run `npm run build` and restart the gateway.
+3. Confirm the gateway health endpoint responds:
+   ```bash
+   curl -s http://127.0.0.1:${MCP_GATEWAY_PORT:-3006}/health
+   ```
+   - `{"status":"ok"}` — subprocess is healthy.
+   - `{"status":"starting"}` — subprocess is still initialising (wait 10 seconds and retry).
+   - Connection refused — the gateway container itself has not started.
+
+### Bridge receives 401 on SSE connection
+
+**Symptom:** Bridge logs show `401 Invalid authentication token` when connecting to the gateway.
+
+**Cause:** `MCP_GATEWAY_TOKEN` in Bridge's environment does not match the value in the gateway's environment, or Bridge is connecting to the wrong URL (still hitting the squad-api instead of the gateway).
+
+**Resolution:**
+1. Confirm the token in both environments matches exactly (no trailing whitespace):
+   ```bash
+   echo -n "$MCP_GATEWAY_TOKEN" | wc -c   # Should be 64
+   ```
+2. Confirm `MCP_GATEWAY_URL` in Bridge points to the gateway port (default `3006`), not the squad-api port (`3005`).
+3. If the token was recently rotated, confirm Bridge was restarted *before* the gateway. The gateway invalidates the old token immediately on restart.
+
+### Bridge receives 429 on SSE connection
+
+**Symptom:** Bridge logs show `429 Too many SSE connection attempts. Retry later.`
+
+**Cause:** Bridge is reconnecting more than 10 times per minute to the gateway. This typically happens when Bridge has a connection loop bug or is restarting too aggressively.
+
+**Resolution:**
+1. Check Bridge's reconnection backoff settings — it should use exponential backoff, not a fixed short interval.
+2. The rate limit resets after 60 seconds. Wait for the window to expire before the next connection attempt.
+3. If the gateway restarted (e.g. during a deploy), Bridge will trigger the rate limit if it reconnects immediately. Add a 5-second minimum backoff before SSE reconnection.
+
+### Port collision — gateway won't bind
+
+**Symptom:** Gateway container exits immediately with `EADDRINUSE` or `address already in use`.
+
+**Cause:** Another process on the host is already using `MCP_GATEWAY_PORT` (default `3006`). Common on hosts running multiple Squad Instances.
+
+**Resolution:**
+1. Find the process using the port:
+   ```bash
+   lsof -i :3006
+   ```
+2. Set a different `MCP_GATEWAY_PORT` in `.env` (e.g. `3016` for a second Squad Instance).
+3. Update `MCP_GATEWAY_URL` in Bridge to match the new port.
+4. Restart the gateway.
