@@ -121,7 +121,10 @@ services:
         condition: service_completed_successfully
     stdin_open: true  # Required: keeps stdin open for StdioServerTransport
     environment:
-      DATABASE_URL: postgresql://openhiveos:${POSTGRES_PASSWORD}@postgres:5432/openhiveos
+      # SEC-7: runtime uses opensquad_app (DML only, no DDL, CONNECTION LIMIT 25).
+      # opensquad_app is created by migration 007_db_roles_sec7.sql.
+      # Set APP_PASSWORD in .env — must differ from POSTGRES_PASSWORD.
+      DATABASE_URL: postgresql://opensquad_app:${APP_PASSWORD}@postgres:5432/openhiveos
       GEMINI_API_KEY: ${GEMINI_API_KEY}
       HEALTH_PORT: ${HEALTH_PORT:-3000}
       # ARCH-013: boot step 3.5 — verifies the Ethos Seal file against DB signature.
@@ -160,7 +163,9 @@ services:
       migrate:
         condition: service_completed_successfully
     environment:
-      DATABASE_URL: postgresql://openhiveos:${POSTGRES_PASSWORD}@postgres:5432/openhiveos # gitleaks:allow
+      DATABASE_URL: postgresql://opensquad_app:${APP_PASSWORD}@postgres:5432/openhiveos # gitleaks:allow
+      # SEC-7: runtime services use opensquad_app (DML only, CONNECTION LIMIT 25).
+      # Do NOT use POSTGRES_PASSWORD here — that belongs to the migrate service only.
       SQUAD_API_PORT: ${SQUAD_API_PORT:-3005}
       # Must be 0.0.0.0 inside the container so Compose health checks and
       # internal routing work. Host binding below keeps external exposure to
@@ -206,7 +211,9 @@ services:
       migrate:
         condition: service_completed_successfully
     environment:
-      DATABASE_URL: postgresql://openhiveos:${POSTGRES_PASSWORD}@postgres:5432/openhiveos # gitleaks:allow
+      DATABASE_URL: postgresql://opensquad_app:${APP_PASSWORD}@postgres:5432/openhiveos # gitleaks:allow
+      # SEC-7: runtime services use opensquad_app (DML only, CONNECTION LIMIT 25).
+      # Do NOT use POSTGRES_PASSWORD here — that belongs to the migrate service only.
       ETHOS_SEAL_SECRET: ${ETHOS_SEAL_SECRET}
       ETHOS_SEAL_PATH: /ethos-seal/ethos.seal.json
     volumes:
@@ -240,7 +247,9 @@ services:
       migrate:
         condition: service_completed_successfully
     environment:
-      DATABASE_URL: postgresql://openhiveos:${POSTGRES_PASSWORD}@postgres:5432/openhiveos # gitleaks:allow
+      DATABASE_URL: postgresql://opensquad_app:${APP_PASSWORD}@postgres:5432/openhiveos # gitleaks:allow
+      # SEC-7: runtime services use opensquad_app (DML only, CONNECTION LIMIT 25).
+      # Do NOT use POSTGRES_PASSWORD here — that belongs to the migrate service only.
       ETHOS_SEAL_PATH: /ethos-seal/ethos.seal.json
       PROVISION_ENV_DIR: /provision
     volumes:
@@ -288,7 +297,9 @@ services:
       migrate:
         condition: service_completed_successfully
     environment:
-      DATABASE_URL: postgresql://openhiveos:${POSTGRES_PASSWORD}@postgres:5432/openhiveos # gitleaks:allow
+      DATABASE_URL: postgresql://opensquad_app:${APP_PASSWORD}@postgres:5432/openhiveos # gitleaks:allow
+      # SEC-7: runtime services use opensquad_app (DML only, CONNECTION LIMIT 25).
+      # Do NOT use POSTGRES_PASSWORD here — that belongs to the migrate service only.
       GEMINI_API_KEY: ${GEMINI_API_KEY}
       AGENT_TOKEN: ${AGENT_TOKEN}
       # SEC-D1/D2: authentication token for Bridge SSE connections (64 hex chars)
