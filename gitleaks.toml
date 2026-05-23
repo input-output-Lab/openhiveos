@@ -126,3 +126,28 @@ tags = ["openhiveos", "api-token", "sec-d5", "arch-016"]
     # .env.example has MCP_GATEWAY_TOKEN= with no value — not a real token
     '''MCP_GATEWAY_TOKEN\s*=\s*$''',
   ]
+
+# ---------------------------------------------------------------------------
+# Custom Rule 6 — VITE_DASHBOARD_AGENT_TOKEN (SEC-D1, S8-04)
+#
+# This token is baked into the dashboard Vite bundle at build time via
+# docker build --build-arg VITE_DASHBOARD_AGENT_TOKEN=<token> (S8-04 Path B)
+# or install.sh (Path A). Committing a real token would allow unauthenticated
+# callers to authenticate against the squad-api as the dashboard principal.
+#
+# The existing openhiveos-agent-token rule catches bare token values.
+# This rule additionally catches the Vite ARG / ENV var assignment form.
+# ---------------------------------------------------------------------------
+[[rules]]
+id = "vite-dashboard-agent-token"
+description = "VITE_DASHBOARD_AGENT_TOKEN — Vite build arg baked into dashboard bundle (SEC-D1)"
+regex = '''VITE_DASHBOARD_AGENT_TOKEN\s*=\s*[0-9a-f]{32}\.[0-9a-f]{64}'''
+tags = ["openhiveos", "api-token", "sec-d1", "s8-04"]
+
+  [rules.allowlist]
+  description = "Placeholder and empty assignments in example and config files"
+  regexes = [
+    # .env.example and packages/dashboard/.env.example have VITE_DASHBOARD_AGENT_TOKEN=
+    # with no value — not a real token
+    '''VITE_DASHBOARD_AGENT_TOKEN\s*=\s*$''',
+  ]

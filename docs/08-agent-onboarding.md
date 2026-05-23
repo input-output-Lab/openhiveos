@@ -1,16 +1,17 @@
 # Agent Onboarding Runbook
 
-**Purpose:** Step-by-step procedures for provisioning, rotating, and revoking agent tokens in an OpenHiveOS Squad Instance. Follow this guide every time a new agent joins the Squad or an existing agent's credentials need to be changed.
+**Purpose:** Step-by-step procedures for setting up and maintaining an OpenHiveOS Squad Instance. Covers initial installation, agent token management, company context configuration, and harness connection.
 
 **Owner:** Clarence  
-**Last updated:** 2026-05-21 (Sprint 6 — ARCH-016)  
-**Source authority:** ARCH-001, ARCH-013, ARCH-014, ARCH-015, ARCH-016
+**Last updated:** 2026-05-22 (Sprint 8 — S8-09)  
+**Source authority:** ARCH-001, ARCH-013, ARCH-014, ARCH-015, ARCH-016, ARCH-018
 
 ---
 
 ## Contents
 
-1. [First-time provisioning (new Squad Instance)](#1-first-time-provisioning-new-squad-instance)
+0. [Quick start — first-time install (install.sh)](#0-quick-start--first-time-install-installsh)
+1. [First-time provisioning (manual / post-install)](#1-first-time-provisioning-manual--post-install)
 2. [Rotate a single agent's token](#2-rotate-a-single-agents-token)
 3. [Batch token rotation (all agents)](#3-batch-token-rotation-all-agents)
 4. [Revoke an agent](#4-revoke-an-agent)
@@ -35,18 +36,74 @@ You do not need to be a developer to follow this guide.
 
 ## Prerequisites
 
-- PostgreSQL is running and the migration chain (001–005) has been applied.
-- `ETHOS_SEAL_SECRET` is set in your environment.
+- Docker Engine 24+ with Compose v2 (`docker compose version` confirms this).
+- **Node.js 22+ and npm** on the host machine — required for the dashboard build step. Verify: `node --version` (must be `v22.x` or higher).
+- `openssl` on the host machine — used to generate cryptographic secrets.
+- For re-runs and manual operations: PostgreSQL migrations (001–008) have been applied.
+- `ETHOS_SEAL_SECRET` is set in your `.env`.
 - `ETHOS_SEAL_DIR` points to a writeable directory on the host.
 - `squad.manifest.json` contains all agents you want to provision.
-- For Docker operations: Docker Compose is running (`docker compose ps` shows `postgres` and `migrate` healthy).
-- For direct (non-Docker) operations: Node.js 20+ and `npx tsx` available.
 
 ---
 
-## 1. First-time provisioning (new Squad Instance)
+## 0. Quick start — first-time install (install.sh)
 
-This is the canonical three-stage sequence. Run it once when setting up a new Squad.
+**This is the recommended path for all new Squad Instances.**
+
+`install.sh` automates the full 13-step setup: prerequisites check, `.env` generation, cryptographic secret generation, Ethos Seal initialisation, company identity configuration, token provisioning, dashboard build, and service startup.
+
+Run it from the OpenHiveOS repository root:
+
+```bash
+./install.sh
+```
+
+The script is interactive. It will ask you:
+1. Whether to overwrite an existing `.env` (if one exists).
+2. Your Gemini API key (required for SOP ingestion — see ARCH-009).
+3. Five optional company identity fields (ARCH-018). You can skip these and add them later.
+
+**Expected completion:** All 13 steps succeed, services are healthy, and the summary is printed.
+
+**After install.sh completes:**
+
+- Squad agent tokens are in: `./provision/.env.tokens` (chmod 600)
+- Health check: `http://localhost:3000`
+- Dashboard: `http://localhost:3005`
+- Connect your harness: see [docs/harness-config.md](harness-config.md)
+
+### Company identity (optional — ARCH-018)
+
+If you entered company fields during install (COMPANY_NAME, COMPANY_MISSION, COMPANY_NICHE, COMPANY_3YEAR, COMPANY_VALUES), they are sealed into the Ethos Seal automatically.
+
+**If you skipped the company fields and want to add them later:**
+
+1. Add the five `COMPANY_*` variables to your `.env` file.
+2. Re-run `one-init --revise` to seal the company identity:
+
+```bash
+docker compose --profile init run --rm \
+  -e COMPANY_NAME="Your Company" \
+  -e COMPANY_MISSION="Your mission statement" \
+  -e COMPANY_NICHE="Your niche" \
+  -e COMPANY_3YEAR="Your three-year target" \
+  -e COMPANY_VALUES="value1,value2,value3" \
+  one-init --revise
+```
+
+Once sealed, agents can access company context via the `get_company_ethos` tool.
+
+> **⚠ Breaking change for existing installs upgrading to Sprint 8:** The Ethos Seal schema was extended in Sprint 8 (ARCH-018). If you deployed before Sprint 8, run `one-init --revise` after updating — your existing Seal data is preserved, but the new company block is required for `get_company_ethos` to work correctly.
+
+### Re-running install.sh (idempotency)
+
+`install.sh` is safe to re-run. If `.env` already exists, the script asks before overwriting it. If you choose to keep the existing `.env`, secrets are not regenerated and existing tokens remain valid.
+
+---
+
+## 1. First-time provisioning (manual / post-install)
+
+This is the canonical three-stage sequence. Use this if you skipped `install.sh`, are provisioning on a new host, or need to re-provision without running the full installer.
 
 ### Stage 1 — Initialise the Ethos Seal
 

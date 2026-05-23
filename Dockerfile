@@ -1,4 +1,37 @@
 # -----------------------------------------------------------------------
+# Stage 0 — dashboard build (Path B: Docker Hub / CI distribution)
+# -----------------------------------------------------------------------
+# SEC-D3 OPERATOR NOTE: VITE_DASHBOARD_AGENT_TOKEN is baked into this image
+# layer and is visible via 'docker history'. Never push a token-baked image
+# to a public registry. For self-hosted installs use install.sh (Path A —
+# host npm build + bind mount). For CI / Docker Hub distribution, gate the
+# build behind a private registry and rotate the token when offboarding.
+#
+# If VITE_DASHBOARD_AGENT_TOKEN is not provided (Path A local builds),
+# the dashboard is built with an empty token — the bind mount from
+# docker-compose.yml or install.sh overrides it at runtime.
+# -----------------------------------------------------------------------
+FROM node:22-alpine AS dashboard-build
+
+ARG VITE_DASHBOARD_AGENT_TOKEN
+
+WORKDIR /app/packages/dashboard
+
+COPY packages/dashboard/package*.json ./
+RUN npm ci
+
+COPY packages/dashboard/ ./
+
+# Bake the bearer token into the Vite bundle at compile time.
+# The VITE_ prefix makes it available to import.meta.env in the browser.
+# Token rotation requires a dashboard rebuild and image redeploy.
+ENV VITE_DASHBOARD_AGENT_TOKEN=${VITE_DASHBOARD_AGENT_TOKEN}
+
+RUN npm run build
+# Output lands at ../../dist/dashboard relative to packages/dashboard/,
+# which resolves to /app/dist/dashboard inside this stage.
+
+# -----------------------------------------------------------------------
 # Stage 1 — build
 # -----------------------------------------------------------------------
 FROM node:22-alpine AS build
@@ -25,8 +58,12 @@ ENV NODE_ENV=production
 COPY package*.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 
-# Copy compiled output
+# Copy compiled MCP server + squad-api output
 COPY --from=build /app/dist ./dist
+
+# Copy dashboard SPA (Path B: baked in from dashboard-build stage).
+# Path A (install.sh): this layer is overridden by the bind mount at runtime.
+COPY --from=dashboard-build /app/dist/dashboard ./dist/dashboard
 
 # Copy squad manifest — operators override this with a volume mount
 # to configure their agent roster without rebuilding the image.

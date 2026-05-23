@@ -78,13 +78,72 @@ const sealSecret: string = ETHOS_SEAL_SECRET
 const sealPath: string = resolve(ETHOS_SEAL_PATH)
 
 // ---------------------------------------------------------------------------
+// Company identity env vars (ARCH-018 S8-03)
+// All five must be set, or all five must be absent. Partial config is rejected.
+// SEC-D7: COMPANY_VALUES is parsed from comma-separated string — strip
+// surrounding quotes from each entry, reject empty strings after trim.
+// ---------------------------------------------------------------------------
+const COMPANY_NAME = process.env['COMPANY_NAME']
+const COMPANY_MISSION = process.env['COMPANY_MISSION']
+const COMPANY_3YEAR = process.env['COMPANY_3YEAR']
+const COMPANY_VALUES = process.env['COMPANY_VALUES']
+const COMPANY_NICHE = process.env['COMPANY_NICHE']
+
+const companyVarsSet = [COMPANY_NAME, COMPANY_MISSION, COMPANY_3YEAR, COMPANY_VALUES, COMPANY_NICHE].filter(Boolean).length
+
+let companyEthos: CompanyEthos | undefined
+
+if (companyVarsSet === 5) {
+  // SEC-D7: split on comma, trim whitespace, strip surrounding single/double quotes,
+  // then reject any entry that is empty after processing.
+  const rawValues = (COMPANY_VALUES ?? '').split(',')
+    .map((v) => v.trim().replace(/^["']|["']$/g, ''))
+    .filter((v) => v.length > 0)
+  if (rawValues.length === 0) {
+    console.error('[one-init] Error: COMPANY_VALUES contains no valid entries after parsing (SEC-D7).')
+    console.error('[one-init] Provide at least one non-empty value, e.g.: COMPANY_VALUES="Radical transparency,Systems thinking"')
+    process.exit(1)
+  }
+  // Keys in canonical alphabetical order per ARCH-018: mission, name, niche, three_year_picture, values
+  companyEthos = {
+    mission: COMPANY_MISSION ?? '',
+    name: COMPANY_NAME ?? '',
+    niche: COMPANY_NICHE ?? '',
+    three_year_picture: COMPANY_3YEAR ?? '',
+    values: rawValues,
+  }
+} else if (companyVarsSet > 0) {
+  console.error('[one-init] Error: Partial company configuration detected.')
+  console.error('[one-init] All five COMPANY_* env vars must be set together, or all must be absent.')
+  console.error('[one-init] Missing:', ['COMPANY_NAME', 'COMPANY_MISSION', 'COMPANY_3YEAR', 'COMPANY_VALUES', 'COMPANY_NICHE']
+    .filter((k) => !process.env[k])
+    .join(', '))
+  process.exit(1)
+}
+
+// ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
+
+/**
+ * Company identity block — ARCH-018 S8-03.
+ * All five fields required when the block is present. Absent = unconfigured.
+ * Keys defined in canonical (alphabetical) order: mission, name, niche, three_year_picture, values.
+ */
+interface CompanyEthos {
+  mission: string
+  name: string
+  niche: string
+  three_year_picture: string
+  values: string[]
+}
+
 interface EthosSealPayload {
   squad: string
   manifestVersion: string
   agents: Array<{ slug: string; name: string; role: string }>
   initialisedAt: string  // ISO 8601
+  company?: CompanyEthos  // ARCH-018 S8-03 — optional company identity extension
   // version is NOT in the payload — it is derived inside the DB transaction
   // (COALESCE(MAX(version), 0) + 1) and stored as a separate column.
 }
@@ -97,9 +156,33 @@ interface EthosSealRecord {
 // ---------------------------------------------------------------------------
 // HMAC helpers
 // ---------------------------------------------------------------------------
-/** Stable canonical JSON — keys sorted for deterministic serialisation. */
+
+/**
+ * Deep-stable JSON serialisation — all object keys sorted alphabetically at every level.
+ * ARCH-018: company sub-keys must be sorted deterministically for HMAC computation.
+ * Canonical order for company: [mission, name, niche, three_year_picture, values].
+ *
+ * NOTE: checkEthosSeal() uses stored-vs-stored comparison (not re-derivation), so
+ * updating this function does not affect boot verification for existing seals.
+ */
+function stableStringify(value: unknown): string {
+  if (Array.isArray(value)) {
+    return '[' + value.map(stableStringify).join(',') + ']'
+  }
+  if (typeof value === 'object' && value !== null) {
+    const obj = value as Record<string, unknown>
+    const keys = Object.keys(obj).sort()
+    const parts = keys.map(
+      (k) => `${JSON.stringify(k)}:${stableStringify(obj[k])}`,
+    )
+    return '{' + parts.join(',') + '}'
+  }
+  return JSON.stringify(value)
+}
+
+/** Stable canonical JSON — all keys sorted recursively for deterministic serialisation. */
 function canonicalise(payload: EthosSealPayload): string {
-  return JSON.stringify(payload, Object.keys(payload).sort() as (keyof EthosSealPayload)[])
+  return stableStringify(payload)
 }
 
 /** HMAC-SHA256(canonical_json, ETHOS_SEAL_SECRET) — stored in ethos_seals.signature. */
@@ -139,6 +222,11 @@ async function confirmWithOperator(payload: EthosSealPayload): Promise<boolean> 
   console.log('─────────────────────────────────────────────────────────')
   console.log(`  Squad:    ${payload.squad}`)
   console.log(`  Agents:   ${payload.agents.map((a) => a.slug).join(', ')}`)
+  if (payload.company !== undefined) {
+    console.log(`  Company:  ${payload.company.name}`)
+    console.log(`  Mission:  ${payload.company.mission}`)
+    console.log(`  Values:   ${payload.company.values.join(' | ')}`)
+  }
   console.log(`  Mode:     ${isRevise ? '--revise (replaces active seal)' : 'first init'}`)
   console.log('─────────────────────────────────────────────────────────')
   console.log('')
@@ -255,13 +343,19 @@ const db = new Pool({
 })
 
 async function main(): Promise<void> {
-  // Build the payload from the squad manifest
+  // Build the payload from the squad manifest.
+  // company is included when all five COMPANY_* env vars are set (ARCH-018 S8-03).
   const payload: EthosSealPayload = {
     squad: manifest.squad,
     manifestVersion: manifest.version,
     agents: manifest.agents.map((a) => ({ slug: a.slug, name: a.name, role: a.role })),
     initialisedAt: new Date().toISOString(),
     // version is derived inside the SERIALIZABLE transaction — not pre-computed here.
+    ...(companyEthos !== undefined ? { company: companyEthos } : {}),
+  }
+
+  if (companyEthos !== undefined) {
+    console.log(`[one-init] Company context will be included in the seal (ARCH-018).`)
   }
 
   const confirmed = await confirmWithOperator(payload)

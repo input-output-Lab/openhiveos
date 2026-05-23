@@ -7,6 +7,7 @@
  * Usage:
  *   npx tsx scripts/provision-agent-token.ts <agent-slug>              # provision / rotate
  *   npx tsx scripts/provision-agent-token.ts <agent-slug> --revoke     # deactivate agent
+ *   npx tsx scripts/provision-agent-token.ts <agent-slug> --token-only # emit raw token to stdout (for scripted capture)
  *   npx tsx scripts/provision-agent-token.ts --help
  *
  * Requirements:
@@ -52,8 +53,12 @@ Usage:
   npx tsx scripts/provision-agent-token.ts --help
 
 Flags:
-  --revoke  Deactivate the agent's token. Sets active=false in the DB.
-            The row is NOT deleted - audit trail is preserved (SEC-C7).
+  --revoke      Deactivate the agent's token. Sets active=false in the DB.
+                The row is NOT deleted - audit trail is preserved (SEC-C7).
+  --token-only  Machine-readable mode. Emits the raw token value to stdout
+                (one line, no surrounding text). All other output goes to
+                stderr. Designed for scripted capture: TOKEN=$(... --token-only).
+                Cannot be combined with --revoke.
 
 Notes:
   - AGENT_TOKEN is printed to stdout once. Store it immediately.
@@ -73,6 +78,7 @@ if (args.includes('--help') || args.includes('-h')) {
 }
 
 const isRevoke = args.includes('--revoke')
+const isTokenOnly = args.includes('--token-only')
 const slug = args.find((a) => !a.startsWith('--'))
 
 if (!slug) {
@@ -137,7 +143,14 @@ try {
     // upsertAgent with forceRotate=true always produces a new token - never skipped.
     // The skipped branch is unreachable here but required for type safety.
     if (result.skipped) {
-      console.log(`[provision] Agent "${slug}" already provisioned (no rotation requested).`)
+      if (!isTokenOnly) {
+        console.log(`[provision] Agent "${slug}" already provisioned (no rotation requested).`)
+      }
+    } else if (isTokenOnly) {
+      // Machine-readable mode: emit raw token to stdout only.
+      // All diagnostic output goes to stderr to keep stdout clean for capture.
+      process.stderr.write(`[provision] Token stored for ${slug} (${agent.name}).\n`)
+      process.stdout.write(`${result.token}\n`)
     } else {
       console.log('[provision] Token stored successfully.')
       console.log('')

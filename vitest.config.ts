@@ -29,6 +29,14 @@ export default defineConfig({
       // the Coverage Debt register is worked down (S7-07 + S7-08 expansion).
       // See scout coverage-debt notes.
       thresholds: {
+        'src/primitives/**': {
+          lines: 85,
+          branches: 65,
+        },
+        'src/sops/**': {
+          lines: 85,
+          branches: 65,
+        },
         'src/workers/**': {
           lines: 85,
           branches: 65,

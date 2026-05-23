@@ -8,6 +8,10 @@ coverage/
 # Ethos Seal export — SEC-B4 (ARCH-013). Never commit.
 ethos.seal.json
 
+# Generated harness configs — contain plaintext agent tokens (chmod 600).
+# See docs/harness-config.md and provision/.env.tokens.
+harness/
+
 # Dashboard package
 packages/dashboard/node_modules/
 packages/dashboard/.env.local

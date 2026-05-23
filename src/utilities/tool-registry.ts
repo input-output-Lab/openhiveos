@@ -38,6 +38,8 @@ export const REGISTERED_TOOL_NAMES = [
   'delete_cron',
   'query_crons',
   'update_cron',
+  // Ethos Utilities (ARCH-018 S8-03)
+  'get_company_ethos',
 ] as const
 
 export type RegisteredToolName = (typeof REGISTERED_TOOL_NAMES)[number]

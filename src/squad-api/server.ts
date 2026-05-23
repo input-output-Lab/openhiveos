@@ -116,9 +116,8 @@ export function createSquadApiApp(): express.Application {
   // This handles client-side routes: /, /agents, /usage, etc.
   // Falls back to a plain-text 404 if the dashboard has not been built yet.
   // ---------------------------------------------------------------------------
-  // Express 5 / path-to-regexp v8 requires a named wildcard — bare '*' is rejected.
-  app.get('/{*splat}', (_req, res) => {
-    res.sendFile(join(dashboardPath, 'index.html'), (err: Error | undefined) => {
+  app.get('*', (_req, res) => {
+    res.sendFile(join(dashboardPath, 'index.html'), (err: unknown) => {
       if (err) {
         res.status(404).send('Dashboard not built. Run: npm run build:all')
       }

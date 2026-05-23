@@ -117,3 +117,43 @@ These items are confirmed as the highest-priority security backlog items for the
 
 *ARCH-003 authored by Clarence. Technical rationale provided by Silas. Security ruling by Locksmith. Strategic positioning inputs from Nova. Vote confirmed by Elizabeth.*
 *Review date: 2026-08-19 (90 days) or upon Phase 2 commencement, whichever is sooner.*
+
+---
+
+## Addendum — Open Condition C2: Tier Boundary Governance
+
+**Date:** 2026-05-22
+**Authored by:** Silas
+**Status:** Closed
+
+The tier boundary governance authority is resolved as a two-track model:
+
+**Track 1 — New capability classification (first classification of a new tool):**
+Silas issues the OS Primitive or Coordination Utility classification at PR review time. Elizabeth gates sprint close on the classification field being present and signed off in the PR. No RFC required — this is a naming decision, not a structural change.
+
+**Track 2 — Reclassification (tier promotion or demotion of an existing tool):**
+Any proposal to move a tool from Coordination Utility to OS Primitive (or vice versa) requires:
+1. A cross-seat RFC filed as a named ADR addendum or a new ADR, with a 48-hour comment window open to all agent seats.
+2. Any seat with an active dependency on the tool must respond with +1 or surface a blocking concern before the window closes.
+3. Silas casts the deciding vote after the comment period. The rationale and any dissenting positions are recorded.
+4. A backwards compatibility impact statement is required for any OS Primitive demotion. Coordination Utility promotions require a stability commitment from Silas (API contract frozen, deprecation window defined).
+
+**Permanent constraint:** The two-tier model is adopted permanently. Neither tier can be dissolved by any single seat without a full re-architecture ADR. The model cannot be dissolved to resolve a classification dispute — classification disputes escalate through Track 2.
+
+*Open Condition C2 is closed.*
+
+---
+
+## Addendum — Open Condition C3: MemPalace Vector Store Authority
+
+**Date:** 2026-05-22
+**Authored by:** Silas
+**Status:** Closed (OpenHiveOS scope) / Remains open (opensquad-mcp-server scope)
+
+**OpenHiveOS scope (this repo):**
+pgvector is the sole authoritative vector store for OpenHiveOS. There is no ChromaDB integration in this codebase and none is planned. ARCH-002 established pgvector as the backend; ARCH-009 confirmed pgvector as the SOP embedding store. C3 is resolved for this repo by design constraint: all embeddings (memory, thoughts, SOPs) write to PostgreSQL + pgvector. No secondary vector backend exists or will be introduced without a new ADR.
+
+**Factory scope (opensquad-mcp-server):**
+The MemPalace question — ChromaDB as authoritative backend vs pgvector replica vs co-equal — remains open at the factory level. That is outside the scope of this ADR and must be addressed by the opensquad-mcp-server team before any MemPalace Phase 2 work begins in that repo. This addendum does not resolve C3 for the parent project.
+
+*Open Condition C3 is closed for OpenHiveOS scope.*

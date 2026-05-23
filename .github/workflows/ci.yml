@@ -211,6 +211,12 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Build image for scanning
+        # SEC-D2: VITE_DASHBOARD_AGENT_TOKEN is NOT passed here — CI scan builds
+        # the dashboard with an empty token. This is intentional: Trivy scans the
+        # base image for CVEs, not dashboard content. A real token must NEVER be
+        # hardcoded in this file. When adding a Docker Hub publish job, supply the
+        # token exclusively via: --build-arg VITE_DASHBOARD_AGENT_TOKEN=${{ secrets.VITE_DASHBOARD_AGENT_TOKEN }}
+        # and ensure VITE_DASHBOARD_AGENT_TOKEN is registered as a masked GitHub Actions secret.
         run: docker build --target production -t openhiveos:ci-scan .
 
       - name: Run Trivy — CRITICAL exit on any finding (SEC-8)

@@ -1,16 +1,18 @@
 // Entry point — OpenHiveOS MCP server boot sequence (ARCH-008 Decisions 4 + 7)
 //
-// Boot order (6 steps — Decision 7 addendum extends Decision 4's original 5):
-//   1. Validate env      (config.ts  — throws on missing vars incl. AGENT_TOKEN)
-//   2. Connect DB        (db/client  — throws on connection failure)
-//   3. Check fingerprint (db/fingerprint — throws on schema drift)
-//   3.5 Check Ethos Seal (db/ethos-seal — exits if seal absent or drifted, ARCH-013)
-//   4. Resolve identity  (auth/identity — throws if AGENT_TOKEN unresolvable)
-//   5. Start health      (health     — GET /health on HEALTH_PORT)
-//   6. Connect MCP       (StdioServerTransport — begins accepting tool calls)
+// Boot order (7 steps — Decision 7 addendum + ARCH-009 SOP ingest):
+//   1.   Validate env      (config.ts  — throws on missing vars incl. AGENT_TOKEN)
+//   2.   Connect DB        (db/client  — throws on connection failure)
+//   3.   Check fingerprint (db/fingerprint — throws on schema drift)
+//   3.5  Check Ethos Seal  (db/ethos-seal — exits if seal absent or drifted, ARCH-013)
+//   3.75 SOP ingest        (sops/ingest — upsert seeds/sops/**/*.md, ARCH-009 S8-02)
+//   4.   Resolve identity  (auth/identity — throws if AGENT_TOKEN unresolvable)
+//   5.   Start health      (health     — GET /health on HEALTH_PORT)
+//   6.   Connect MCP       (StdioServerTransport — begins accepting tool calls)
 //
 // The MCP server never accepts connections unless all prior steps succeed.
 // agentSlug is resolved at Step 4 and closed over in all handler registrations.
+import { join } from 'node:path'
 import './config.js' // Step 1: validate env immediately — throws on missing vars
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
@@ -40,12 +42,15 @@ import { handleCreateCron, createCronSchema } from './utilities/create-cron.js'
 import { handleUpdateCron, updateCronSchema } from './utilities/update-cron.js'
 import { handleQueryCrons, queryCronsSchema } from './utilities/query-crons.js'
 import { handleDeleteCron, deleteCronSchema } from './utilities/delete-cron.js'
+import { handleGetCompanyEthos, getCompanyEthosSchema } from './utilities/get-company-ethos.js'
 import { CronWorker } from './workers/cron.worker.js'
 import { ToolDispatcher } from './workers/tool-dispatcher.js'
+import { runSopIngest } from './sops/ingest.js'
 
 await connectDb()           // Step 2
 await checkFingerprint()    // Step 3
 await checkEthosSeal()      // Step 3.5 — exits on absent or drifted seal (ARCH-013 SEC-B8)
+await runSopIngest(join(process.cwd(), 'seeds', 'sops')) // Step 3.75 — ARCH-009 S8-02
 const agentSlug = await resolveIdentity() // Step 4 — halts process on failure
 startHealthServer()         // Step 5
 
@@ -186,6 +191,13 @@ server.registerTool('delete_cron', { inputSchema: deleteCronSchema.shape }, asyn
 // create_cron — write, requires agentSlug (SEC-26 + SEC-27 + SEC-28 + SEC-29)
 server.registerTool('create_cron', { inputSchema: createCronSchema.shape }, async (args) => ({
   content: [{ type: 'text' as const, text: JSON.stringify(await handleCreateCron(args, agentSlug)) }],
+}))
+
+// get_company_ethos — read, no params, squad-wide (ARCH-018 S8-03)
+// Returns company identity from the active Ethos Seal payload.
+// { configured: false } when company block is absent — not an error.
+server.registerTool('get_company_ethos', { inputSchema: getCompanyEthosSchema.shape }, async () => ({
+  content: [{ type: 'text' as const, text: JSON.stringify(await handleGetCompanyEthos()) }],
 }))
 
 const transport = new StdioServerTransport()

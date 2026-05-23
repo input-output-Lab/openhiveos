@@ -40,6 +40,10 @@ const MIGRATIONS = [
   '004_ethos_seal.sql',
   '005_llm_usage.sql',
   '006_cron_next_fire_at.sql',
+  // 007_db_roles_sec7.sql creates opensquad_app / opensquad_migrate roles with
+  // CREATE ROLE IF NOT EXISTS (PG16+ syntax). We connect as superuser in the
+  // testcontainer anyway, so role isolation is not required for tests.
+  '008_sops_ingest_columns.sql',
 ]
 
 /**
