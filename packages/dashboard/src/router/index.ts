@@ -1,6 +1,8 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import EthosSealView from '../views/EthosSealView.vue'
+import DashboardView from '../views/DashboardView.vue'
 import AgentsView from '../views/AgentsView.vue'
+import InboxView from '../views/InboxView.vue'
+import EthosSealView from '../views/EthosSealView.vue'
 import UsageView from '../views/UsageView.vue'
 
 export const router = createRouter({
@@ -8,20 +10,31 @@ export const router = createRouter({
   routes: [
     {
       path: '/',
-      component: EthosSealView,
-      meta: { title: 'Ethos Seal' },
+      component: DashboardView,
+      meta: { title: 'Dashboard' },
     },
     {
       path: '/agents',
       component: AgentsView,
-      meta: { title: 'Agents' },
+      meta: { title: 'Agent Registry' },
+    },
+    {
+      path: '/inbox',
+      component: InboxView,
+      meta: { title: 'Inbox' },
+    },
+    // Legacy routes — preserved for now
+    {
+      path: '/ethos-seal',
+      component: EthosSealView,
+      meta: { title: 'Ethos Seal' },
     },
     {
       path: '/usage',
       component: UsageView,
       meta: { title: 'Usage' },
     },
-    // SPA fallback — redirect unknown routes to root
+    // SPA fallback — redirect unknown routes to dashboard
     {
       path: '/:pathMatch(.*)*',
       redirect: '/',

@@ -1,15 +1,78 @@
 {
-  "version": "1.0.0",
+  "version": "1.1.0",
   "squad": "io-labs",
   "agents": [
-    { "slug": "murphy",    "name": "Murphy",    "role": "Senior Backend Developer" },
-    { "slug": "silas",     "name": "Silas",     "role": "Systems Architect" },
-    { "slug": "elizabeth", "name": "Elizabeth", "role": "Project Manager" },
-    { "slug": "rocket",    "name": "Rocket",    "role": "Frontend Developer" },
-    { "slug": "clarence",  "name": "Clarence",  "role": "Technical Writer" },
-    { "slug": "locksmith", "name": "Locksmith", "role": "Security Engineer" },
-    { "slug": "nova",      "name": "Nova",      "role": "Strategic Advisor" },
-    { "slug": "cooper",    "name": "Cooper",    "role": "DevOps Engineer" },
-    { "slug": "meridian",  "name": "Meridian",  "role": "Data Analyst" }
+    {
+      "slug": "murphy",
+      "name": "Murphy",
+      "role": "Senior Backend Developer",
+      "skills": ["api-design", "db-design", "code-review", "bug-triage", "tech-debt-audit"],
+      "owns": ["feature-delivery", "api-contracts", "test-coverage", "developer-mentorship"],
+      "works_with": ["silas", "rocket", "scout"]
+    },
+    {
+      "slug": "silas",
+      "name": "Silas",
+      "role": "Systems Architect",
+      "skills": ["db-design", "code-review", "tech-debt-audit", "performance-audit", "security-compliance"],
+      "owns": ["schema-design", "architecture-review", "dependency-approval", "refactor-design", "system-health"],
+      "works_with": ["murphy", "cooper", "locksmith"]
+    },
+    {
+      "slug": "elizabeth",
+      "name": "Elizabeth",
+      "role": "Project Manager",
+      "skills": ["backlog-grooming", "feature-intake", "hour-estimation", "gantt-roadmap", "roadmap-review", "roi-scoring", "pm-intelligence"],
+      "owns": ["sprint-planning", "backlog", "rock-tracking", "issue-list", "l10-meeting"],
+      "works_with": ["murphy", "rocket", "nova"]
+    },
+    {
+      "slug": "rocket",
+      "name": "Rocket",
+      "role": "Frontend Developer",
+      "skills": ["component-build", "mobile-first-css", "accessibility-audit", "a11y-verification", "frontend-test-coverage", "performance-audit", "api-handshake", "io-design-direction"],
+      "owns": ["ui-components", "frontend-architecture", "design-system", "cross-browser-verification"],
+      "works_with": ["murphy", "elizabeth", "locksmith"]
+    },
+    {
+      "slug": "clarence",
+      "name": "Clarence",
+      "role": "Technical Writer",
+      "skills": ["api-design", "obsidian-compliance", "iso-27001"],
+      "owns": ["documentation", "knowledge-base", "sop-library", "adrs", "onboarding-guides"],
+      "works_with": ["silas", "murphy", "nova"]
+    },
+    {
+      "slug": "locksmith",
+      "name": "Locksmith",
+      "role": "Security Engineer",
+      "skills": ["security-compliance", "grc-controls", "iso-27001", "incident-resilience", "sonar-analysis"],
+      "owns": ["security-architecture", "threat-model", "vulnerability-triage", "access-control-review"],
+      "works_with": ["silas", "cooper", "nova"]
+    },
+    {
+      "slug": "nova",
+      "name": "Nova",
+      "role": "Strategic Advisor",
+      "skills": ["roi-scoring", "pm-intelligence", "roadmap-review", "gantt-roadmap"],
+      "owns": ["strategic-direction", "cross-project-patterns", "founder-bandwidth-protection"],
+      "works_with": ["elizabeth", "locksmith", "zero"]
+    },
+    {
+      "slug": "cooper",
+      "name": "Cooper",
+      "role": "DevOps Engineer",
+      "skills": ["deployment-procedures", "docker-troubleshooting", "health-monitoring", "database-operations", "automation-workflows", "incident-response", "slack-alerting"],
+      "owns": ["infrastructure", "deployment-pipeline", "ci-cd", "backup-recovery", "server-health"],
+      "works_with": ["silas", "locksmith", "murphy"]
+    },
+    {
+      "slug": "meridian",
+      "name": "Meridian",
+      "role": "Data Analyst",
+      "skills": [],
+      "owns": ["data-analytics", "reporting", "dashboards"],
+      "works_with": ["elizabeth", "nova", "murphy"]
+    }
   ]
 }

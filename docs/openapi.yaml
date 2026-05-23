@@ -200,6 +200,350 @@ components:
           description: Human-readable error message.
           example: "No usage data found for agent \"murphy\""
 
+    # --- Health probe --------------------------------------------------------
+    HealthResponse:
+      type: object
+      required: [status, service, db, schema]
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded]
+          description: Top-level health signal. `ok` when all checks pass; `degraded` when any check fails.
+        service:
+          type: string
+          example: squad-api
+          description: Identifies the responding process.
+        db:
+          type: string
+          enum: [connected, error]
+          description: PostgreSQL pool connectivity status.
+        schema:
+          type: string
+          enum: [ok, degraded]
+          description: Schema integrity status. `degraded` when one or more required tables are absent.
+        missing_tables:
+          type: array
+          items:
+            type: string
+          description: Present only when `schema` is `degraded`. Lists the table names that are absent.
+          example: [tasks, projects]
+        error:
+          type: string
+          description: Present only when `db` is `error`. Raw error message from the pool — never exposes credentials.
+          example: "Connection refused"
+
+    # --- Agent roster --------------------------------------------------------
+    AgentRow:
+      type: object
+      required: [slug, display_name, active, updated_at, last_used_at, active_task_count]
+      properties:
+        slug:
+          type: string
+          example: murphy
+        display_name:
+          type: string
+          example: Murphy
+        active:
+          type: boolean
+        updated_at:
+          type: string
+          format: date-time
+        last_used_at:
+          type: string
+          format: date-time
+          nullable: true
+        active_task_count:
+          type: integer
+          minimum: 0
+          description: Count of tasks in todo/wip/review/rework status assigned to this agent. Never null.
+          example: 3
+
+    AgentManifest:
+      type: object
+      nullable: true
+      description: |
+        Static identity data loaded from `squad.manifest.json` at server startup (SEC-C5).
+        Null if the agent slug is not present in the manifest.
+
+        **OQ-2 / ARCH-020:** `skills`, `owns`, and `works_with` were added in manifest v1.1.0.
+        These are identity-layer fields — they describe capability and structural relationships,
+        not runtime state. Stored in the manifest (not the DB) because they require no independent
+        queryability at v1. Migration path documented in ARCH-020.
+      required: [role, skills, owns, works_with]
+      properties:
+        role:
+          type: string
+          description: The agent's seat title on the Accountability Chart.
+          example: Senior Backend Developer
+        skills:
+          type: array
+          items:
+            type: string
+          description: Skill slugs the agent is authorised to execute (matches IO Labs skill library names).
+          example: ["api-design", "db-design", "code-review"]
+        owns:
+          type: array
+          items:
+            type: string
+          description: Domains and outcomes this agent is the decision authority for.
+          example: ["feature-delivery", "api-contracts", "test-coverage"]
+        works_with:
+          type: array
+          items:
+            type: string
+          description: Agent slugs this agent routinely collaborates with.
+          example: ["silas", "rocket", "scout"]
+
+    AgentDetail:
+      allOf:
+        - $ref: "#/components/schemas/AgentRow"
+        - type: object
+          required: [manifest]
+          properties:
+            manifest:
+              $ref: "#/components/schemas/AgentManifest"
+
+    # --- SOPs ----------------------------------------------------------------
+    SopRow:
+      type: object
+      required: [id, source_path, display_name, category, agent, preview, created_at, updated_at]
+      properties:
+        id:
+          type: integer
+          description: Primary key.
+        source_path:
+          type: string
+          nullable: true
+          description: |
+            Absolute path to the source `.md` file on disk. Null for SOPs
+            ingested without a file reference.
+        display_name:
+          type: string
+          description: |
+            Human-readable label derived server-side from `source_path` basename
+            (`.md` extension stripped). Empty string when `source_path` is null.
+          example: "git-deployment-workflow"
+        category:
+          type: string
+          enum: [Coding, DevOps, QA, Architecture, Documentation, Decision]
+          description: SOP category — one of the VALID_CATEGORIES allowlist (SEC-C7).
+        agent:
+          type: string
+          nullable: true
+          description: Agent slug the SOP is scoped to. Null for org-wide SOPs.
+        preview:
+          type: string
+          maxLength: 200
+          description: First 200 characters of the `instruction` field. Full text not exposed in list endpoint.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    SopsResponse:
+      type: object
+      required: [sops, pagination]
+      properties:
+        sops:
+          type: array
+          items:
+            $ref: "#/components/schemas/SopRow"
+        pagination:
+          type: object
+          required: [limit, offset, has_more]
+          properties:
+            limit:
+              type: integer
+              minimum: 1
+              maximum: 100
+            offset:
+              type: integer
+              minimum: 0
+            has_more:
+              type: boolean
+              description: True when a (limit+1)th row exists beyond this page.
+
+    TaskRow:
+      type: object
+      required:
+        - id
+        - project_id
+        - project_slug
+        - title
+        - status
+        - assignee_agent_slug
+        - github_pr_url
+        - notes
+        - description
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: integer
+          description: Task primary key.
+        project_id:
+          type: integer
+          description: FK to projects.id.
+        project_slug:
+          type: string
+          nullable: true
+          description: Denormalized from LEFT JOIN projects. Null on FK orphan (not possible by schema constraints, included for type safety).
+        title:
+          type: string
+          description: Short task title.
+        description:
+          type: string
+          nullable: true
+          description: Extended description. Null when not provided.
+        status:
+          type: string
+          enum: [todo, wip, review, done, rework]
+          description: Task status — one of VALID_TASK_STATUSES (SEC-C3).
+        assignee_agent_slug:
+          type: string
+          nullable: true
+          description: Agent slug. Null when unassigned.
+        github_pr_url:
+          type: string
+          nullable: true
+          description: GitHub PR URL if linked. Null otherwise.
+        notes:
+          type: string
+          nullable: true
+          description: Free-form notes. Null when not provided.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    TasksResponse:
+      type: object
+      required: [tasks, pagination]
+      properties:
+        tasks:
+          type: array
+          items:
+            $ref: "#/components/schemas/TaskRow"
+        pagination:
+          type: object
+          required: [limit, offset, has_more]
+          properties:
+            limit:
+              type: integer
+              minimum: 1
+              maximum: 100
+            offset:
+              type: integer
+              minimum: 0
+            has_more:
+              type: boolean
+              description: True when a (limit+1)th row exists beyond this page.
+
+    ThoughtRow:
+      type: object
+      required:
+        - id
+        - agent_slug
+        - session_id
+        - task_id
+        - thought
+        - thought_type
+        - confidence
+        - must_surface
+        - auto_persist_candidate
+        - ratified_by
+        - ratified_at
+        - auto_persisted
+        - counter_thought
+        - metadata
+        - created_at
+      description: |
+        A single thought record. The following columns are intentionally excluded
+        (SEC-B1, SEC-B3): `embedding`, `raw_behavior`, `expressed_behavior`,
+        `disposition_snapshot`.
+      properties:
+        id:
+          type: integer
+        agent_slug:
+          type: string
+          description: The agent that recorded this thought.
+        session_id:
+          type: string
+          nullable: true
+          description: Session identifier. Null when thought was recorded outside a tracked session.
+        task_id:
+          type: integer
+          nullable: true
+          description: Soft reference to a task. Not a FK — may reference tasks in any tier.
+        thought:
+          type: string
+          description: The thought content.
+        thought_type:
+          type: string
+          enum: [analysis, concern, decision, hypothesis, realization, pushback]
+          description: Thought classification (SEC-C3 allowlist).
+        confidence:
+          type: number
+          format: float
+          minimum: 0.0
+          maximum: 1.0
+          nullable: true
+        must_surface:
+          type: boolean
+          description: True when the thought requires human review.
+        auto_persist_candidate:
+          type: boolean
+          description: True when the thought is a candidate for automatic persistence to long-term memory.
+        ratified_by:
+          type: string
+          nullable: true
+          description: Slug of the agent (or operator) that ratified this thought. Null when unratified.
+        ratified_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: ISO 8601 timestamp of ratification. Null when unratified.
+        auto_persisted:
+          type: boolean
+          description: True when the thought has been automatically written to long-term memory.
+        counter_thought:
+          nullable: true
+          description: Structured counter-argument JSONB, if any. Shape is agent-defined.
+        metadata:
+          type: object
+          description: Operational metadata JSONB. Shape is agent-defined.
+          additionalProperties: true
+        created_at:
+          type: string
+          format: date-time
+
+    ThoughtsResponse:
+      type: object
+      required: [thoughts, pagination]
+      properties:
+        thoughts:
+          type: array
+          items:
+            $ref: "#/components/schemas/ThoughtRow"
+        pagination:
+          type: object
+          required: [limit, offset, has_more]
+          properties:
+            limit:
+              type: integer
+              minimum: 1
+              maximum: 100
+            offset:
+              type: integer
+              minimum: 0
+            has_more:
+              type: boolean
+              description: True when a (limit+1)th row exists beyond this page.
+
     # --- Ingestion payload ---------------------------------------------------
     UsageIngestionPayload:
       type: object
@@ -279,6 +623,484 @@ components:
 # Paths
 # ---------------------------------------------------------------------------
 paths:
+
+  # -------------------------------------------------------------------------
+  # Health probe
+  # -------------------------------------------------------------------------
+  /health:
+    get:
+      operationId: getHealth
+      summary: Infrastructure health probe
+      description: |
+        Checks DB connectivity and schema integrity. No authentication required.
+        Safe to poll from external monitors and the dashboard health strip.
+
+        Returns HTTP 200 when `status` is `ok`.
+        Returns HTTP 503 when `status` is `degraded` (DB error or missing tables).
+
+        Response shape confirmed by Silas — ARCH-019 Sprint 9 planning (2026-05-23).
+        Implemented in `src/squad-api/routes/health.ts`.
+      tags: [Health]
+      responses:
+        "200":
+          description: All checks pass.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+              example:
+                status: ok
+                service: squad-api
+                db: connected
+                schema: ok
+        "503":
+          description: DB unreachable or one or more required tables are missing.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+              examples:
+                dbError:
+                  summary: DB connection failed
+                  value:
+                    status: degraded
+                    service: squad-api
+                    db: error
+                    schema: degraded
+                    error: "Connection refused"
+                schemaDegraded:
+                  summary: Missing tables
+                  value:
+                    status: degraded
+                    service: squad-api
+                    db: connected
+                    schema: degraded
+                    missing_tables: [tasks, projects]
+
+  # -------------------------------------------------------------------------
+  # Agent roster
+  # -------------------------------------------------------------------------
+  /api/agents:
+    get:
+      operationId: getAgents
+      summary: All provisioned agents
+      description: |
+        Returns all agents from the `agents` table, ordered active-first then
+        by slug. Each row includes `active_task_count` — the number of tasks
+        in `todo`, `wip`, `review`, or `rework` status assigned to that agent
+        (LEFT JOIN — zero-task agents return 0, never null; SEC-C6).
+
+        Token columns (`token_hash`, `token_salt`, all `previous_token_*`) are
+        excluded from the response (SEC-A6).
+
+        Queries via `openhiveos_reader` role (SEC-A5).
+      tags: [Agents]
+      security:
+        - AgentBearer: []
+      responses:
+        "200":
+          description: Agent roster returned.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [agents]
+                properties:
+                  agents:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AgentRow"
+        "401":
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Database error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/agents/{slug}:
+    get:
+      operationId: getAgentBySlug
+      summary: Single agent — DB state composited with manifest role
+      description: |
+        Returns runtime state from the `agents` table composited with the
+        static manifest role from `squad.manifest.json` (loaded once at startup,
+        not per-request; SEC-C5).
+
+        The `manifest` field is `null` when the slug is absent from the manifest
+        (e.g. for agents provisioned after the manifest was last updated).
+
+        Returns 404 when the slug is not found in the `agents` table. The error
+        message does not reveal the existence of other slugs (SEC-C4).
+
+        Token columns excluded (SEC-A6). Queries via `openhiveos_reader` (SEC-A5).
+      tags: [Agents]
+      security:
+        - AgentBearer: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Agent slug (e.g. `murphy`).
+      responses:
+        "200":
+          description: Agent found.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [agent]
+                properties:
+                  agent:
+                    $ref: "#/components/schemas/AgentDetail"
+        "401":
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Agent slug not found in the `agents` table.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Database error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # -------------------------------------------------------------------------
+  # SOPs
+  # -------------------------------------------------------------------------
+  /api/sops:
+    get:
+      operationId: getSops
+      summary: Paginated SOP roster
+      description: |
+        Returns a paginated list of SOPs from the `sops` table.
+
+        The `embedding` vector column is never returned (SEC-B1 principle).
+        The `instruction` field is truncated to a 200-character `preview` —
+        the full instruction text is not exposed in list responses.
+
+        `display_name` is derived server-side from the `source_path` basename
+        with the `.md` extension stripped (no `title` column on the `sops` table).
+
+        **Pagination** follows the ARCH-019 model:
+        - `limit` integer [1, 100], default 25
+        - `offset` integer ≥ 0, default 0
+        - `has_more` true when a (limit+1)th row exists — no COUNT(*)
+
+        **Category filter** (`category` query param) is validated against the
+        `VALID_CATEGORIES` named const in the handler (SEC-C7 — auditability
+        requires the allowlist to be a named constant, not an inline literal).
+        An unrecognised value returns 400.
+      tags: [SOPs]
+      security:
+        - AgentBearer: []
+      parameters:
+        - name: category
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [Coding, DevOps, QA, Architecture, Documentation, Decision]
+          description: Filter by SOP category (SEC-C7 allowlist).
+        - name: agent
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Filter by agent slug. Returns SOPs scoped to that agent only.
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 25
+          description: Page size.
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+          description: Number of rows to skip.
+      responses:
+        "200":
+          description: SOP list returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SopsResponse"
+              example:
+                sops:
+                  - id: 1
+                    source_path: "/Users/richo/.copilot/agents/murphy/sops/git-deployment-workflow.md"
+                    display_name: "git-deployment-workflow"
+                    category: "Coding"
+                    agent: "murphy"
+                    preview: "Follow this workflow for all deployments..."
+                    created_at: "2026-05-01T10:00:00.000Z"
+                    updated_at: "2026-05-01T10:00:00.000Z"
+                pagination:
+                  limit: 25
+                  offset: 0
+                  has_more: false
+        "400":
+          description: Invalid query parameter (unknown category, limit out of range, negative offset).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Database error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # -------------------------------------------------------------------------
+  # Tasks
+  # -------------------------------------------------------------------------
+  /api/tasks:
+    get:
+      operationId: getTasks
+      summary: Paginated task roster
+      description: |
+        Returns a paginated list of tasks.
+
+        Each row includes `project_slug` via a LEFT JOIN on `projects` — the
+        dashboard InboxView uses this to link to the project without a second
+        round-trip.
+
+        **Pagination** follows the ARCH-019 model:
+        - `limit` integer [1, 100], default 25
+        - `offset` integer ≥ 0, default 0
+        - `has_more` true when a (limit+1)th row exists — no COUNT(*)
+
+        **Status filter** is validated against the `VALID_TASK_STATUSES` named
+        const in the handler (SEC-C3). An unrecognised value returns 400.
+
+        **Ordering:** `updated_at DESC, id DESC` — most recently touched tasks first.
+      tags: [Tasks]
+      security:
+        - AgentBearer: []
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [todo, wip, review, done, rework]
+          description: Filter by task status (SEC-C3 allowlist).
+        - name: assignee
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Filter by assignee_agent_slug. Exact match.
+        - name: project_id
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+          description: Filter to a single project by its primary key.
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 25
+          description: Page size.
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+          description: Number of rows to skip.
+      responses:
+        "200":
+          description: Task list returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TasksResponse"
+              example:
+                tasks:
+                  - id: 1
+                    project_id: 1
+                    project_slug: "openhiveos"
+                    title: "Implement GET /api/tasks"
+                    description: "Day 3 gate for InboxView"
+                    status: "done"
+                    assignee_agent_slug: "murphy"
+                    github_pr_url: null
+                    notes: null
+                    created_at: "2026-05-23T07:00:00.000Z"
+                    updated_at: "2026-05-23T09:00:00.000Z"
+                pagination:
+                  limit: 25
+                  offset: 0
+                  has_more: false
+        "400":
+          description: Invalid query parameter (unknown status, invalid project_id, limit/offset out of range).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Database error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # -------------------------------------------------------------------------
+  # Thoughts
+  # -------------------------------------------------------------------------
+  /api/thoughts:
+    get:
+      operationId: getThoughts
+      summary: Paginated thought roster
+      description: |
+        Returns a paginated list of agent thoughts.
+
+        The following columns are intentionally excluded (SEC-B1, SEC-B3):
+        `embedding`, `raw_behavior`, `expressed_behavior`, `disposition_snapshot`.
+
+        **Pagination** follows the ARCH-019 model:
+        - `limit` integer [1, 100], default 25
+        - `offset` integer ≥ 0, default 0
+        - `has_more` true when a (limit+1)th row exists — no COUNT(*)
+
+        **thought_type filter** is validated against the `VALID_THOUGHT_TYPES`
+        named const in the handler (SEC-C3). An unrecognised value returns 400.
+
+        **Ordering:** `created_at DESC, id DESC` — most recent thoughts first.
+      tags: [Thoughts]
+      security:
+        - AgentBearer: []
+      parameters:
+        - name: agent_slug
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Filter to thoughts recorded by this agent.
+        - name: thought_type
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [analysis, concern, decision, hypothesis, realization, pushback]
+          description: Filter by thought type (SEC-C3 allowlist).
+        - name: must_surface
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: ["true", "false"]
+          description: Filter to surfaced (true) or non-surfaced (false) thoughts.
+        - name: session_id
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Filter to a specific session.
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 25
+          description: Page size.
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+          description: Number of rows to skip.
+      responses:
+        "200":
+          description: Thought list returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ThoughtsResponse"
+              example:
+                thoughts:
+                  - id: 1
+                    agent_slug: "murphy"
+                    session_id: "murphy:session:1716451200000"
+                    task_id: null
+                    thought: "The partial index on sops.source_path requires ON CONFLICT to match the WHERE predicate."
+                    thought_type: "realization"
+                    confidence: 0.95
+                    must_surface: false
+                    auto_persist_candidate: true
+                    ratified_by: null
+                    ratified_at: null
+                    auto_persisted: false
+                    counter_thought: null
+                    metadata: {}
+                    created_at: "2026-05-23T09:00:00.000Z"
+                pagination:
+                  limit: 25
+                  offset: 0
+                  has_more: false
+        "400":
+          description: Invalid query parameter (unknown thought_type, invalid must_surface, limit/offset out of range).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Database error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   # -------------------------------------------------------------------------
   # Ethos Seal
@@ -529,6 +1351,16 @@ paths:
 # Tags (display grouping)
 # ---------------------------------------------------------------------------
 tags:
+  - name: Health
+    description: Infrastructure health probe. No auth. Safe to poll from external monitors and dashboard health strip.
+  - name: Agents
+    description: Agent roster — runtime state from the DB composited with static manifest roles.
+  - name: SOPs
+    description: SOP roster — paginated, category-filtered. embedding excluded; instruction truncated to 200-char preview.
+  - name: Tasks
+    description: Task roster — paginated, filterable by status/assignee/project. project_slug denormalized from JOIN.
+  - name: Thoughts
+    description: Thought roster — paginated, filterable by agent/type/must_surface/session. embedding + behaviour columns excluded (SEC-B1, SEC-B3).
   - name: Ethos Seal
     description: Squad constitutional document — versioned, HMAC-signed, boot-verified.
   - name: Usage

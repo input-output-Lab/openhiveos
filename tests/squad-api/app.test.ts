@@ -22,6 +22,8 @@
  *   GET  /api/usage/tasks/:id  — 200 ok                              (TC-SA6)
  *   GET  /api/agents           — 200 ok                              (TC-SA7)
  *   POST /internal/usage       — 401 no token, 401 bad token, 200 ok (TC-SA8-SA10)
+ *   GET  /api/agents/:slug     — 200 ok, 404 not found               (TC-SA11-SA12)
+ *   GET  /api/sops             — 200 ok, filters, pagination          (TC-SA13-SA16)
  */
 
 import { vi, describe, it, expect, beforeAll, afterAll } from 'vitest'
@@ -103,11 +105,18 @@ afterAll(async () => {
 // ---------------------------------------------------------------------------
 
 describe('GET /health', () => {
-  it('TC-SA1: returns 200 with status ok — no auth required', async () => {
+  it('TC-SA1: returns 200 with status ok and full health shape — no auth required', async () => {
     const app = createSquadApiApp()
     const res = await request(app).get('/health')
     expect(res.status).toBe(200)
-    expect(res.body).toMatchObject({ status: 'ok', service: 'squad-api' })
+    expect(res.body).toMatchObject({
+      status: 'ok',
+      service: 'squad-api',
+      db: 'connected',
+      schema: 'ok',
+    })
+    // missing_tables must not be present when schema is ok
+    expect(res.body.missing_tables).toBeUndefined()
   })
 })
 
@@ -184,6 +193,89 @@ describe('GET /api/agents', () => {
     const slugs = body.agents.map(a => a.slug)
     expect(slugs).toContain('squad-test-agent')
   })
+
+  it('TC-SA7b: returns active_task_count (integer, not null) for each agent', async () => {
+    const app = createSquadApiApp()
+    const res = await request(app)
+      .get('/api/agents')
+      .set('Authorization', `Bearer ${VALID_TOKEN}`)
+    expect(res.status).toBe(200)
+    const body = res.body as { agents: Array<{ slug: string; active_task_count: number }> }
+    const testAgent = body.agents.find(a => a.slug === 'squad-test-agent')
+    expect(testAgent).toBeDefined()
+    // SEC-C6: active_task_count must be an integer, never null
+    expect(typeof testAgent!.active_task_count).toBe('number')
+    expect(Number.isInteger(testAgent!.active_task_count)).toBe(true)
+    expect(testAgent!.active_task_count).toBe(0) // no tasks in test DB
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Agent detail — GET /api/agents/:slug
+// ---------------------------------------------------------------------------
+
+describe('GET /api/agents/:slug', () => {
+  it('TC-SA11: returns 200 with agent row and manifest null for unknown manifest slug', async () => {
+    const app = createSquadApiApp()
+    const res = await request(app)
+      .get('/api/agents/squad-test-agent')
+      .set('Authorization', `Bearer ${VALID_TOKEN}`)
+    expect(res.status).toBe(200)
+    const body = res.body as {
+      agent: { slug: string; active_task_count: number; manifest: unknown }
+    }
+    expect(body.agent.slug).toBe('squad-test-agent')
+    // SEC-C6: active_task_count is integer, never null
+    expect(typeof body.agent.active_task_count).toBe('number')
+    expect(body.agent.active_task_count).toBe(0)
+    // squad-test-agent is not in squad.manifest.json — manifest must be null
+    expect(body.agent.manifest).toBeNull()
+  })
+
+  it('TC-SA11b: manifest agent returns role + skills + owns + works_with (OQ-2 / ARCH-020)', async () => {
+    // Seed murphy into the test DB — slug is present in squad.manifest.json
+    await db.pool.query(
+      `INSERT INTO agents (slug, display_name, token_hash, token_salt)
+       VALUES ('murphy', 'Murphy', $1, $2)
+       ON CONFLICT (slug) DO NOTHING`,
+      [createHash('sha256').update('manifest-test-salt' + 'a'.repeat(64)).digest('hex'), 'manifest-test-salt'],
+    )
+
+    const app = createSquadApiApp()
+    const res = await request(app)
+      .get('/api/agents/murphy')
+      .set('Authorization', `Bearer ${VALID_TOKEN}`)
+    expect(res.status).toBe(200)
+
+    const manifest = res.body.agent.manifest as {
+      role: string
+      skills: string[]
+      owns: string[]
+      works_with: string[]
+    }
+    expect(manifest).not.toBeNull()
+    expect(typeof manifest.role).toBe('string')
+    expect(manifest.role).toBe('Senior Backend Developer')
+    // OQ-2: skills, owns, works_with must be string arrays
+    expect(Array.isArray(manifest.skills)).toBe(true)
+    expect(manifest.skills.length).toBeGreaterThan(0)
+    expect(manifest.skills).toContain('api-design')
+    expect(Array.isArray(manifest.owns)).toBe(true)
+    expect(manifest.owns.length).toBeGreaterThan(0)
+    expect(manifest.owns).toContain('feature-delivery')
+    expect(Array.isArray(manifest.works_with)).toBe(true)
+    expect(manifest.works_with.length).toBeGreaterThan(0)
+    expect(manifest.works_with).toContain('silas')
+  })
+
+  it('TC-SA12: returns 404 for a slug not in the agents table', async () => {
+    const app = createSquadApiApp()
+    const res = await request(app)
+      .get('/api/agents/nonexistent-agent-xyz')
+      .set('Authorization', `Bearer ${VALID_TOKEN}`)
+    expect(res.status).toBe(404)
+    expect(res.body).toMatchObject({ error: 'Agent not found' })
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -223,5 +315,300 @@ describe('POST /internal/usage', () => {
       .send(payload)
     // 200/201 (success), 400/422 (validation error) — any confirm auth passed
     expect([200, 201, 400, 422]).toContain(res.status)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// GET /api/sops
+// ---------------------------------------------------------------------------
+
+describe('GET /api/sops', () => {
+  it('TC-SA13: returns 200 with sops array and pagination envelope', async () => {
+    const app = createSquadApiApp()
+    const res = await request(app)
+      .get('/api/sops')
+      .set('Authorization', `Bearer ${VALID_TOKEN}`)
+    expect(res.status).toBe(200)
+    expect(Array.isArray(res.body.sops)).toBe(true)
+    expect(res.body.pagination).toBeDefined()
+    expect(typeof res.body.pagination.limit).toBe('number')
+    expect(typeof res.body.pagination.offset).toBe('number')
+    expect(typeof res.body.pagination.has_more).toBe('boolean')
+  })
+
+  it('TC-SA14: each sop row has display_name, preview, no instruction, no embedding', async () => {
+    // Seed one SOP row
+    await db.pool.query(
+      `INSERT INTO sops (category, agent, instruction, source_path)
+       VALUES ('Coding', 'squad-test-agent', 'This is the full instruction text that is longer than the preview limit.', '/sops/test-sop.md')
+       ON CONFLICT (source_path) WHERE source_path IS NOT NULL DO NOTHING`,
+    )
+
+    const app = createSquadApiApp()
+    const res = await request(app)
+      .get('/api/sops')
+      .set('Authorization', `Bearer ${VALID_TOKEN}`)
+    expect(res.status).toBe(200)
+
+    if (res.body.sops.length > 0) {
+      const sop = res.body.sops[0] as Record<string, unknown>
+      expect(typeof sop['display_name']).toBe('string')
+      expect(typeof sop['preview']).toBe('string')
+      expect(sop['instruction']).toBeUndefined()
+      expect(sop['embedding']).toBeUndefined()
+      // preview must not exceed 200 chars
+      expect((sop['preview'] as string).length).toBeLessThanOrEqual(200)
+    }
+  })
+
+  it('TC-SA15: category filter — valid category returns 200, invalid returns 400', async () => {
+    const app = createSquadApiApp()
+
+    const goodRes = await request(app)
+      .get('/api/sops?category=Coding')
+      .set('Authorization', `Bearer ${VALID_TOKEN}`)
+    expect(goodRes.status).toBe(200)
+
+    const badRes = await request(app)
+      .get('/api/sops?category=InvalidCategory')
+      .set('Authorization', `Bearer ${VALID_TOKEN}`)
+    expect(badRes.status).toBe(400)
+    expect(badRes.body.error).toMatch(/Invalid category/)
+  })
+
+  it('TC-SA16: pagination — limit and offset are validated (400 on out-of-range)', async () => {
+    const app = createSquadApiApp()
+
+    const badLimit = await request(app)
+      .get('/api/sops?limit=200')
+      .set('Authorization', `Bearer ${VALID_TOKEN}`)
+    expect(badLimit.status).toBe(400)
+
+    const badOffset = await request(app)
+      .get('/api/sops?offset=-1')
+      .set('Authorization', `Bearer ${VALID_TOKEN}`)
+    expect(badOffset.status).toBe(400)
+
+    const goodRes = await request(app)
+      .get('/api/sops?limit=10&offset=0')
+      .set('Authorization', `Bearer ${VALID_TOKEN}`)
+    expect(goodRes.status).toBe(200)
+    expect(goodRes.body.pagination.limit).toBe(10)
+    expect(goodRes.body.pagination.offset).toBe(0)
+  })
+})
+
+// =============================================================================
+// GET /api/tasks (S9-BE-01)
+// =============================================================================
+describe('GET /api/tasks', () => {
+  it('TC-SA17: returns 200 with tasks array and pagination envelope', async () => {
+    const app = createSquadApiApp()
+    const res = await request(app)
+      .get('/api/tasks')
+      .set('Authorization', `Bearer ${VALID_TOKEN}`)
+    expect(res.status).toBe(200)
+    expect(Array.isArray(res.body.tasks)).toBe(true)
+    expect(res.body.pagination).toBeDefined()
+    expect(typeof res.body.pagination.limit).toBe('number')
+    expect(typeof res.body.pagination.offset).toBe('number')
+    expect(typeof res.body.pagination.has_more).toBe('boolean')
+  })
+
+  it('TC-SA18: each task row has expected shape — project_slug present, no forbidden columns', async () => {
+    // Seed: project owned by squad-test-agent, then one task in that project
+    const projectRes = await db.pool.query<{ id: number }>(
+      `INSERT INTO projects (slug, name, owner_agent_slug)
+       VALUES ('squad-test-project', 'Squad Test Project', 'squad-test-agent')
+       ON CONFLICT (slug) DO NOTHING
+       RETURNING id`,
+    )
+    // If DO NOTHING fired, fetch the id
+    const projectId: number = projectRes.rows[0]?.id
+      ?? (await db.pool.query<{ id: number }>(
+            `SELECT id FROM projects WHERE slug = 'squad-test-project'`,
+          )).rows[0]!.id
+
+    await db.pool.query(
+      `INSERT INTO tasks (project_id, title, status, assignee_agent_slug)
+       VALUES ($1, 'Test task for TC-SA18', 'todo', 'squad-test-agent')`,
+      [projectId],
+    )
+
+    const app = createSquadApiApp()
+    const res = await request(app)
+      .get('/api/tasks')
+      .set('Authorization', `Bearer ${VALID_TOKEN}`)
+    expect(res.status).toBe(200)
+
+    const tasks: unknown[] = res.body.tasks
+    expect(tasks.length).toBeGreaterThan(0)
+
+    const task = tasks[0] as Record<string, unknown>
+    expect(typeof task['id']).toBe('number')
+    expect(typeof task['project_id']).toBe('number')
+    // project_slug must be present (string or null — not undefined)
+    expect('project_slug' in task).toBe(true)
+    expect(typeof task['title']).toBe('string')
+    expect(typeof task['status']).toBe('string')
+    // These fields must exist but may be null
+    expect('assignee_agent_slug' in task).toBe(true)
+    expect('github_pr_url' in task).toBe(true)
+    expect('notes' in task).toBe(true)
+    expect('description' in task).toBe(true)
+    expect('created_at' in task).toBe(true)
+    expect('updated_at' in task).toBe(true)
+    // project_slug should equal the slug we seeded
+    const seededTask = tasks.find((t) => (t as Record<string, unknown>)['assignee_agent_slug'] === 'squad-test-agent')
+    expect(seededTask).toBeDefined()
+    expect((seededTask as Record<string, unknown>)['project_slug']).toBe('squad-test-project')
+  })
+
+  it('TC-SA19: status filter — valid status returns 200, invalid returns 400 with error', async () => {
+    const app = createSquadApiApp()
+
+    const goodRes = await request(app)
+      .get('/api/tasks?status=todo')
+      .set('Authorization', `Bearer ${VALID_TOKEN}`)
+    expect(goodRes.status).toBe(200)
+    // All returned tasks must match the filtered status
+    const tasks: unknown[] = goodRes.body.tasks
+    for (const t of tasks) {
+      expect((t as Record<string, unknown>)['status']).toBe('todo')
+    }
+
+    const badRes = await request(app)
+      .get('/api/tasks?status=invalid-status')
+      .set('Authorization', `Bearer ${VALID_TOKEN}`)
+    expect(badRes.status).toBe(400)
+    expect(badRes.body.error).toMatch(/Invalid status/)
+  })
+
+  it('TC-SA20: pagination — limit and offset validated; invalid project_id rejected', async () => {
+    const app = createSquadApiApp()
+
+    const badLimit = await request(app)
+      .get('/api/tasks?limit=0')
+      .set('Authorization', `Bearer ${VALID_TOKEN}`)
+    expect(badLimit.status).toBe(400)
+
+    const badOffset = await request(app)
+      .get('/api/tasks?offset=-5')
+      .set('Authorization', `Bearer ${VALID_TOKEN}`)
+    expect(badOffset.status).toBe(400)
+
+    const badProjectId = await request(app)
+      .get('/api/tasks?project_id=0')
+      .set('Authorization', `Bearer ${VALID_TOKEN}`)
+    expect(badProjectId.status).toBe(400)
+
+    const goodRes = await request(app)
+      .get('/api/tasks?limit=10&offset=0')
+      .set('Authorization', `Bearer ${VALID_TOKEN}`)
+    expect(goodRes.status).toBe(200)
+    expect(goodRes.body.pagination.limit).toBe(10)
+    expect(goodRes.body.pagination.offset).toBe(0)
+  })
+})
+
+// =============================================================================
+// GET /api/thoughts (S9-BE-04)
+// =============================================================================
+describe('GET /api/thoughts', () => {
+  it('TC-SA21: returns 200 with thoughts array and pagination envelope', async () => {
+    const app = createSquadApiApp()
+    const res = await request(app)
+      .get('/api/thoughts')
+      .set('Authorization', `Bearer ${VALID_TOKEN}`)
+    expect(res.status).toBe(200)
+    expect(Array.isArray(res.body.thoughts)).toBe(true)
+    expect(res.body.pagination).toBeDefined()
+    expect(typeof res.body.pagination.limit).toBe('number')
+    expect(typeof res.body.pagination.offset).toBe('number')
+    expect(typeof res.body.pagination.has_more).toBe('boolean')
+  })
+
+  it('TC-SA22: each thought row has expected shape — sensitive columns excluded', async () => {
+    // Seed one thought for squad-test-agent
+    await db.pool.query(
+      `INSERT INTO thoughts (agent_slug, thought, thought_type, must_surface)
+       VALUES ('squad-test-agent', 'Test thought content for TC-SA22.', 'analysis', false)`,
+    )
+
+    const app = createSquadApiApp()
+    const res = await request(app)
+      .get('/api/thoughts?agent_slug=squad-test-agent')
+      .set('Authorization', `Bearer ${VALID_TOKEN}`)
+    expect(res.status).toBe(200)
+
+    const thoughts: unknown[] = res.body.thoughts
+    expect(thoughts.length).toBeGreaterThan(0)
+
+    const thought = thoughts[0] as Record<string, unknown>
+    // Required fields present
+    expect(typeof thought['id']).toBe('number')
+    expect(typeof thought['agent_slug']).toBe('string')
+    expect(typeof thought['thought']).toBe('string')
+    expect(typeof thought['thought_type']).toBe('string')
+    expect(typeof thought['must_surface']).toBe('boolean')
+    expect(typeof thought['auto_persist_candidate']).toBe('boolean')
+    expect(typeof thought['auto_persisted']).toBe('boolean')
+    expect('session_id' in thought).toBe(true)
+    expect('task_id' in thought).toBe(true)
+    expect('confidence' in thought).toBe(true)
+    expect('ratified_by' in thought).toBe(true)
+    expect('ratified_at' in thought).toBe(true)
+    expect('counter_thought' in thought).toBe(true)
+    expect('metadata' in thought).toBe(true)
+    expect('created_at' in thought).toBe(true)
+
+    // SEC-B1, SEC-B3: these columns must NEVER appear in the response
+    expect('embedding' in thought).toBe(false)
+    expect('raw_behavior' in thought).toBe(false)
+    expect('expressed_behavior' in thought).toBe(false)
+    expect('disposition_snapshot' in thought).toBe(false)
+  })
+
+  it('TC-SA23: thought_type filter — valid type returns 200, invalid returns 400', async () => {
+    const app = createSquadApiApp()
+
+    const goodRes = await request(app)
+      .get('/api/thoughts?thought_type=analysis')
+      .set('Authorization', `Bearer ${VALID_TOKEN}`)
+    expect(goodRes.status).toBe(200)
+    const thoughts: unknown[] = goodRes.body.thoughts
+    for (const t of thoughts) {
+      expect((t as Record<string, unknown>)['thought_type']).toBe('analysis')
+    }
+
+    const badRes = await request(app)
+      .get('/api/thoughts?thought_type=invalid-type')
+      .set('Authorization', `Bearer ${VALID_TOKEN}`)
+    expect(badRes.status).toBe(400)
+    expect(badRes.body.error).toMatch(/Invalid thought_type/)
+  })
+
+  it('TC-SA24: must_surface and pagination validated; invalid values return 400', async () => {
+    const app = createSquadApiApp()
+
+    const badMustSurface = await request(app)
+      .get('/api/thoughts?must_surface=yes')
+      .set('Authorization', `Bearer ${VALID_TOKEN}`)
+    expect(badMustSurface.status).toBe(400)
+
+    const badLimit = await request(app)
+      .get('/api/thoughts?limit=101')
+      .set('Authorization', `Bearer ${VALID_TOKEN}`)
+    expect(badLimit.status).toBe(400)
+
+    const goodSurface = await request(app)
+      .get('/api/thoughts?must_surface=true&limit=5&offset=0')
+      .set('Authorization', `Bearer ${VALID_TOKEN}`)
+    expect(goodSurface.status).toBe(200)
+    expect(goodSurface.body.pagination.limit).toBe(5)
+    const surfacedThoughts: unknown[] = goodSurface.body.thoughts
+    for (const t of surfacedThoughts) {
+      expect((t as Record<string, unknown>)['must_surface']).toBe(true)
+    }
   })
 })

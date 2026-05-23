@@ -20,3 +20,82 @@
     display: none;
   }
 }
+
+/* ── Neural Expressive: Status Aura @keyframes ──────────────────────────────
+   Uses filter:drop-shadow for GPU compositing — safer cross-browser than
+   box-shadow on animating elements (avoids Safari repaint cost).
+   Scout S9-TST-02 will verify frame rate Day 6+.
+──────────────────────────────────────────────────────────────────────────── */
+
+@keyframes aura-ok-pulse {
+  0%, 100% {
+    filter: drop-shadow(0 0 3px #71F79F) drop-shadow(0 0 6px #71F79Faa);
+    opacity: 1;
+  }
+  50% {
+    filter: drop-shadow(0 0 6px #71F79F) drop-shadow(0 0 14px #71F79F88);
+    opacity: 0.85;
+  }
+}
+
+@keyframes aura-degraded-pulse {
+  0%, 100% {
+    filter: drop-shadow(0 0 3px #f59e0b) drop-shadow(0 0 6px #f59e0baa);
+    opacity: 1;
+  }
+  50% {
+    filter: drop-shadow(0 0 6px #f59e0b) drop-shadow(0 0 12px #f59e0b88);
+    opacity: 0.8;
+  }
+}
+
+.aura-ok {
+  animation: aura-ok-pulse 2.4s ease-in-out infinite;
+}
+
+.aura-degraded {
+  animation: aura-degraded-pulse 1.8s ease-in-out infinite;
+}
+
+/* ── Neural Expressive: Route transition ────────────────────────────────────
+   mode="out-in" on the <Transition> wrapper in App.vue.
+   Short fade + subtle upward drift — operator-grade, not consumer-playful.
+──────────────────────────────────────────────────────────────────────────── */
+
+.page-enter-active {
+  transition: opacity 160ms ease, transform 160ms ease;
+}
+.page-leave-active {
+  transition: opacity 100ms ease, transform 100ms ease;
+}
+.page-enter-from {
+  opacity: 0;
+  transform: translateY(6px);
+}
+.page-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+
+/* ── Neural Expressive: List stagger (v-move on TransitionGroup) ────────────
+   Apply .stagger-list on the <TransitionGroup> tag.
+──────────────────────────────────────────────────────────────────────────── */
+
+.stagger-list-enter-active {
+  transition: opacity 200ms ease, transform 200ms ease;
+}
+.stagger-list-leave-active {
+  transition: opacity 120ms ease, transform 120ms ease;
+  position: absolute;
+}
+.stagger-list-move {
+  transition: transform 280ms ease;
+}
+.stagger-list-enter-from {
+  opacity: 0;
+  transform: translateY(8px);
+}
+.stagger-list-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
+}

@@ -23,7 +23,11 @@
       <!-- Scrollable content -->
       <main class="flex-1 overflow-y-auto px-6 py-8 lg:px-10">
         <div class="max-w-5xl mx-auto">
-          <RouterView />
+          <RouterView v-slot="{ Component }">
+            <Transition name="page" mode="out-in">
+              <component :is="Component" :key="$route.path" />
+            </Transition>
+          </RouterView>
         </div>
       </main>
     </div>

@@ -14,4 +14,7 @@ export const squadApiRateLimit = rateLimit({
   standardHeaders: 'draft-7',
   legacyHeaders: false,
   message: { error: 'Too many requests — retry after the rate limit window' },
+  // Skip rate limiting in test environment — rate limiting is an infra concern
+  // tested at the middleware unit level, not in route integration tests.
+  skip: () => process.env['NODE_ENV'] === 'test',
 })

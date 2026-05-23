@@ -134,9 +134,11 @@ if [ "$SKIP_ENV_WRITE" = false ]; then
   POSTGRES_PASSWORD=$(openssl rand -hex 32)
   APP_PASSWORD=$(openssl rand -hex 32)
   ETHOS_SEAL_SECRET=$(openssl rand -hex 32)
-  ok "POSTGRES_PASSWORD  — 64 hex chars (256-bit)"
-  ok "APP_PASSWORD       — 64 hex chars (SEC-7 credential isolation)"
-  ok "ETHOS_SEAL_SECRET  — 64 hex chars (ARCH-013)"
+  OPENHIVEOS_INGESTION_TOKEN=$(openssl rand -hex 32)
+  ok "POSTGRES_PASSWORD         — 64 hex chars (256-bit)"
+  ok "APP_PASSWORD              — 64 hex chars (SEC-7 credential isolation)"
+  ok "ETHOS_SEAL_SECRET         — 64 hex chars (ARCH-013)"
+  ok "OPENHIVEOS_INGESTION_TOKEN — 64 hex chars (POST /internal/usage — SEC-C1)"
 else
   # Load existing values for subsequent steps
   # shellcheck disable=SC1090
@@ -177,6 +179,9 @@ if [ "$SKIP_ENV_WRITE" = false ]; then
     printf 'ETHOS_SEAL_PATH=./ethos.seal.json\n'
     printf 'ETHOS_SEAL_DIR=./ethos-seal\n'
     printf 'PROVISION_ENV_DIR=./provision\n\n'
+
+    printf '# ── OpenBridge ingestion token (POST /internal/usage — SEC-C1) ──\n'
+    printf 'OPENHIVEOS_INGESTION_TOKEN=%s\n\n' "$OPENHIVEOS_INGESTION_TOKEN"
 
     printf '# ── HTTP ports ───────────────────────────────────────────────────\n'
     printf 'HEALTH_PORT=3000\n'

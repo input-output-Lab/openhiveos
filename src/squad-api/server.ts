@@ -7,8 +7,12 @@ import { authMiddleware } from './middleware/auth.js'
 import { ingestionAuthMiddleware } from './middleware/ingestion-auth.js'
 import { ethosSealRouter } from './routes/ethos-seal.js'
 import { agentsRouter } from './routes/agents.js'
+import { healthRouter } from './routes/health.js'
 import { internalRouter } from './routes/internal.js'
 import { usageRouter } from './routes/usage.js'
+import { sopsRouter } from './routes/sops.js'
+import { tasksRouter } from './routes/tasks.js'
+import { thoughtsRouter } from './routes/thoughts.js'
 
 // ---------------------------------------------------------------------------
 // Squad API — Express 5 application factory (ARCH-012, ARCH-015)
@@ -83,9 +87,8 @@ export function createSquadApiApp(): express.Application {
   // ---------------------------------------------------------------------------
 
   // GET /health — unauthenticated, no rate limit (health probe pattern)
-  app.get('/health', (_req, res) => {
-    res.json({ status: 'ok', service: 'squad-api' })
-  })
+  // Full DB + schema check. See src/squad-api/routes/health.ts.
+  app.use('/health', healthRouter)
 
   // GET /api/ethos-seal — metadata; GET /api/ethos-seal?include=payload — full
   // SEC-B7 (ARCH-013): payload gated; auth enforced upstream by authMiddleware
@@ -95,6 +98,24 @@ export function createSquadApiApp(): express.Application {
   // Auth enforced upstream by authMiddleware on /api/*.
   // Excludes all token columns — slug, display_name, active, timestamps only (SEC-A6).
   app.use('/api/agents', agentsRouter)
+
+  // GET /api/sops — SOP roster, paginated (ARCH-019 S9-BE-03)
+  // Auth enforced upstream by authMiddleware on /api/*.
+  // embedding excluded; instruction truncated to 200-char preview (SEC-B1 principle).
+  // VALID_CATEGORIES allowlist enforced in handler (SEC-C7).
+  app.use('/api/sops', sopsRouter)
+
+  // GET /api/tasks — task roster, paginated (ARCH-019 S9-BE-01)
+  // Auth enforced upstream by authMiddleware on /api/*.
+  // LEFT JOIN projects for project_slug — avoids extra round-trips in InboxView.
+  // VALID_TASK_STATUSES allowlist enforced in handler (SEC-C3).
+  app.use('/api/tasks', tasksRouter)
+
+  // GET /api/thoughts — thought roster, paginated (ARCH-019 S9-BE-04)
+  // Auth enforced upstream by authMiddleware on /api/*.
+  // SEC-B1, SEC-B3: embedding, raw_behavior, expressed_behavior, disposition_snapshot excluded.
+  // VALID_THOUGHT_TYPES allowlist enforced in handler (SEC-C3).
+  app.use('/api/thoughts', thoughtsRouter)
 
   // GET /api/usage/* — LLM cost analytics (ARCH-015)
   // Auth enforced upstream by authMiddleware on /api/*.
@@ -115,8 +136,11 @@ export function createSquadApiApp(): express.Application {
   // static file or an API/internal route above.
   // This handles client-side routes: /, /agents, /usage, etc.
   // Falls back to a plain-text 404 if the dashboard has not been built yet.
+  //
+  // Note: bare `*` is invalid in path-to-regexp v8 (Express 5). Use `/{*path}`
+  // which matches root and all sub-paths with a named wildcard parameter.
   // ---------------------------------------------------------------------------
-  app.get('*', (_req, res) => {
+  app.get('/{*path}', (_req, res) => {
     res.sendFile(join(dashboardPath, 'index.html'), (err: unknown) => {
       if (err) {
         res.status(404).send('Dashboard not built. Run: npm run build:all')

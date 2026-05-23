@@ -17,4 +17,5 @@ export const ingestionRateLimit = rateLimit({
   standardHeaders: 'draft-7',
   legacyHeaders: false,
   message: { error: 'Too many ingestion requests — retry after the rate limit window' },
+  skip: () => process.env['NODE_ENV'] === 'test',
 })

@@ -1,9 +1,12 @@
 import type {
   ApiErrorCode,
+  HealthResponse,
   EthosSealResponse,
   AgentsResponse,
+  AgentDetail,
   AgentMonthRow,
   TaskCostRow,
+  TasksResponse,
 } from '../types/api'
 
 // ---------------------------------------------------------------------------
@@ -78,11 +81,23 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return body as T
 }
 
+// ─── Health ──────────────────────────────────────────────────────────────────
+
+/** System health probe — unauthenticated. Returns degraded on DB/schema failure. */
+export function getHealth(): Promise<HealthResponse> {
+  return request<HealthResponse>('/health')
+}
+
 // ─── Agents ──────────────────────────────────────────────────────────────────
 
-/** Provisioned agent roster — slug, display_name, active status, timestamps. */
+/** Provisioned agent roster — slug, display_name, active status, timestamps, active_task_count. */
 export function getAgents(): Promise<AgentsResponse> {
   return request<AgentsResponse>('/api/agents')
+}
+
+/** Agent detail — DB row + manifest role composite. 404 → SquadApiError(NOT_FOUND). */
+export function getAgentBySlug(slug: string): Promise<AgentDetail> {
+  return request<AgentDetail>(`/api/agents/${encodeURIComponent(slug)}`)
 }
 
 // ─── Ethos Seal ───────────────────────────────────────────────────────────────
@@ -133,4 +148,26 @@ export async function getAgentUsageDetail(slug: string): Promise<AgentMonthRow[]
 export async function getTaskCost(taskId: number): Promise<TaskCostRow[]> {
   const row = await request<TaskCostRow>(`/api/usage/tasks/${taskId}`)
   return [row]
+}
+
+// ─── Tasks ──────────────────────────────────────────────────────────────────────────────────
+
+export interface GetTasksParams {
+  status?: string
+  assignee?: string
+  project_id?: number
+  limit?: number
+  offset?: number
+}
+
+/** Paginated task roster. status/assignee/project_id are optional filters. */
+export function getTasks(params: GetTasksParams = {}): Promise<TasksResponse> {
+  const q = new URLSearchParams()
+  if (params.status)                         q.set('status', params.status)
+  if (params.assignee)                       q.set('assignee', params.assignee)
+  if (params.project_id != null)             q.set('project_id', String(params.project_id))
+  if (params.limit != null)                  q.set('limit', String(params.limit))
+  if (params.offset != null)                 q.set('offset', String(params.offset))
+  const qs = q.toString()
+  return request<TasksResponse>(`/api/tasks${qs ? `?${qs}` : ''}`)
 }

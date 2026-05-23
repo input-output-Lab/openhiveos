@@ -52,14 +52,34 @@ export interface EthosSealResponse {
   history: EthosSealMeta[]
 }
 
+// ─── Health ───────────────────────────────────────────────────────────────────
+
+export interface HealthResponse {
+  status: 'ok' | 'degraded'
+  service: string
+  db: 'connected' | 'error'
+  schema: 'ok' | 'degraded'
+  missing_tables?: string[]
+  error?: string
+}
+
 // ─── Agents ──────────────────────────────────────────────────────────────────
 
 export interface AgentRow {
   slug: string
   display_name: string
   active: boolean
-  updated_at: string        // ISO 8601 — proxy for last token rotation
-  last_used_at: string | null  // ISO 8601 or null if never authenticated
+  updated_at: string              // ISO 8601 — proxy for last token rotation
+  last_used_at: string | null     // ISO 8601 or null if never authenticated
+  active_task_count: number       // SEC-C6: LEFT JOIN tasks, COALESCE to 0
+}
+
+export interface AgentManifest {
+  role: string
+}
+
+export interface AgentDetail extends AgentRow {
+  manifest: AgentManifest | null
 }
 
 export interface AgentsResponse {
@@ -89,4 +109,31 @@ export interface TaskCostRow {
   cost_usd: string
   first_activity: string | null
   last_activity: string | null
+}
+
+// ─── Tasks ────────────────────────────────────────────────────────────────────
+
+export type TaskStatus = 'todo' | 'wip' | 'review' | 'done' | 'rework'
+
+export interface TaskRow {
+  id: number
+  project_id: number
+  project_slug: string | null
+  title: string
+  description: string | null
+  status: TaskStatus
+  assignee_agent_slug: string | null
+  github_pr_url: string | null
+  notes: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface TasksResponse {
+  tasks: TaskRow[]
+  pagination: {
+    limit: number
+    offset: number
+    has_more: boolean
+  }
 }

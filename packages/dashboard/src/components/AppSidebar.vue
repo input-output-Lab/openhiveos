@@ -44,8 +44,12 @@
     <!-- Nav -->
     <nav class="flex-1 overflow-y-auto py-3 scrollbar-none" aria-label="Main navigation">
       <div class="px-2 space-y-0.5">
+        <!-- Section label -->
+        <p class="px-2.5 pt-1 pb-1 text-[9px] font-semibold uppercase tracking-[0.12em] text-white/20">Workspace</p>
+
+        <!-- Active routes -->
         <RouterLink
-          v-for="link in navLinks"
+          v-for="link in activeLinks"
           :key="link.to"
           :to="link.to"
           :class="[
@@ -56,9 +60,27 @@
           ]"
           @click="$emit('close')"
         >
-          <span class="w-4 text-center flex-shrink-0 text-[12px] opacity-80">{{ link.icon }}</span>
+          <span class="w-4 text-center flex-shrink-0 text-[12px] opacity-80" aria-hidden="true">{{ link.icon }}</span>
           {{ link.label }}
         </RouterLink>
+
+        <!-- Divider -->
+        <div class="border-t border-white/[0.06] my-2 mx-2" />
+
+        <!-- Disabled routes — Sprint 10+ -->
+        <p class="px-2.5 pb-1 text-[9px] font-semibold uppercase tracking-[0.12em] text-white/20">Coming soon</p>
+
+        <span
+          v-for="link in disabledLinks"
+          :key="link.to"
+          class="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-[13px] font-medium text-white/20 cursor-not-allowed select-none"
+          aria-disabled="true"
+          :tabindex="-1"
+          :title="`${link.label} — available in a future sprint`"
+        >
+          <span class="w-4 text-center flex-shrink-0 text-[12px]" aria-hidden="true">{{ link.icon }}</span>
+          {{ link.label }}
+        </span>
       </div>
     </nav>
 
@@ -77,11 +99,20 @@ defineEmits<{ close: [] }>()
 
 const route = useRoute()
 
-const navLinks = [
-  { to: '/',       icon: '⬡', label: 'Ethos Seal' },
-  { to: '/agents', icon: '◉', label: 'Agents' },
-  { to: '/usage',  icon: '◈', label: 'Usage' },
-]
+// Sprint 9 — active routes
+const activeLinks = [
+  { to: '/',        icon: '⬡', label: 'Dashboard' },
+  { to: '/inbox',   icon: '◎', label: 'Inbox' },
+  { to: '/agents',  icon: '◉', label: 'Agent Registry' },
+] as const
+
+// Disabled (Sprint 10+) — rendered as non-interactive spans
+const disabledLinks = [
+  { to: '/agents/:slug', icon: '◎', label: 'Agent Detail' },
+  { to: '/sops',         icon: '◈', label: 'SOPs' },
+  { to: '/projects',     icon: '▣', label: 'Projects' },
+  { to: '/org',          icon: '⬡', label: 'Org Chart' },
+] as const
 
 function isActive(to: string): boolean {
   if (to === '/') return route.path === '/'
