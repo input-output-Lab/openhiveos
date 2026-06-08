@@ -289,16 +289,16 @@ describe('handleSearchMemory', () => {
     expect(result.query_meta.method).toBe('passthrough')
   })
 
-  it('TC-SM2: fetchLimit is capped at 20 when limit * 3 would exceed it', async () => {
+  it('TC-SM2: fetchLimit is capped at 60 when limit * 3 would exceed it (Task-1722)', async () => {
     vi.mocked(sanitizeQuery).mockReturnValue(SANITIZE_PASSTHROUGH as any)
     vi.mocked(embedContent).mockResolvedValue(FAKE_EMBEDDING)
     vi.mocked(searchMemory).mockResolvedValue([])
     vi.mocked(hybridRank).mockReturnValue([])
 
-    // limit=20 → 20*3=60, capped to 20
+    // limit=20 → 20*3=60, capped to 60 (cap raised from 20 to 60 in Task-1722)
     await handleSearchMemory({ query: 'test', limit: 20 })
 
-    expect(searchMemory).toHaveBeenCalledWith(expect.objectContaining({ limit: 20 }))
+    expect(searchMemory).toHaveBeenCalledWith(expect.objectContaining({ limit: 60 }))
   })
 
   it('TC-SM3: metadata_filter is forwarded when provided', async () => {

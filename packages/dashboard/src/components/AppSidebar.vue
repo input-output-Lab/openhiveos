@@ -61,58 +61,62 @@
           @click="$emit('close')"
         >
           <span class="w-4 text-center flex-shrink-0 text-[12px] opacity-80" aria-hidden="true">{{ link.icon }}</span>
-          {{ link.label }}
+          <span class="flex-1 min-w-0 truncate">{{ link.label }}</span>
+          <NavBadge v-if="link.badge != null" :count="link.badge" />
         </RouterLink>
 
-        <!-- Divider -->
-        <div class="border-t border-white/[0.06] my-2 mx-2" />
+        <!-- Divider + disabled routes — only shown when there are upcoming features -->
+        <template v-if="disabledLinks.length">
+          <div class="border-t border-white/[0.06] my-2 mx-2" />
+          <p class="px-2.5 pb-1 text-[9px] font-semibold uppercase tracking-[0.12em] text-white/20">Coming soon</p>
 
-        <!-- Disabled routes — Sprint 10+ -->
-        <p class="px-2.5 pb-1 text-[9px] font-semibold uppercase tracking-[0.12em] text-white/20">Coming soon</p>
-
-        <span
-          v-for="link in disabledLinks"
-          :key="link.to"
-          class="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-[13px] font-medium text-white/20 cursor-not-allowed select-none"
-          aria-disabled="true"
-          :tabindex="-1"
-          :title="`${link.label} — available in a future sprint`"
-        >
-          <span class="w-4 text-center flex-shrink-0 text-[12px]" aria-hidden="true">{{ link.icon }}</span>
-          {{ link.label }}
-        </span>
+          <span
+            v-for="link in disabledLinks"
+            :key="link.to"
+            class="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-[13px] font-medium text-white/20 cursor-not-allowed select-none"
+            aria-disabled="true"
+            :tabindex="-1"
+            :title="`${link.label} — available in a future sprint`"
+          >
+            <span class="w-4 text-center flex-shrink-0 text-[12px]" aria-hidden="true">{{ link.icon }}</span>
+            {{ link.label }}
+          </span>
+        </template>
       </div>
     </nav>
 
-    <!-- Footer — version -->
-    <div class="px-4 py-3 border-t border-white/[0.07] flex-shrink-0">
-      <p class="text-white/20 text-[10px] font-mono">v0.1.0</p>
+    <!-- Footer — status + version -->
+    <div class="px-4 py-3 border-t border-white/[0.07] flex-shrink-0 flex items-center justify-between gap-2">
+      <StatusAura />
+      <p class="text-white/20 text-[10px] font-mono flex-shrink-0">v0.1.0</p>
     </div>
   </aside>
 </template>
 
 <script setup lang="ts">
 import { RouterLink, useRoute } from 'vue-router'
+import StatusAura from './StatusAura.vue'
+import NavBadge from './NavBadge.vue'
 
 defineProps<{ mobileOpen: boolean }>()
 defineEmits<{ close: [] }>()
 
 const route = useRoute()
 
-// Sprint 9 — active routes
-const activeLinks = [
-  { to: '/',        icon: '⬡', label: 'Dashboard' },
-  { to: '/inbox',   icon: '◎', label: 'Inbox' },
-  { to: '/agents',  icon: '◉', label: 'Agent Registry' },
-] as const
+// Sprint 9/10 — live routes
+// badge: number → show NavBadge; undefined → no badge
+const activeLinks: Array<{ to: string; icon: string; label: string; badge?: number }> = [
+  { to: '/',         icon: '⬡', label: 'Dashboard' },
+  { to: '/inbox',    icon: '◎', label: 'Inbox' },
+  { to: '/agents',   icon: '◉', label: 'Agent Registry' },
+  { to: '/projects', icon: '▣', label: 'Projects' },
+  { to: '/sops',     icon: '◈', label: 'SOPs' },
+  { to: '/org',      icon: '⬡', label: 'Org Chart' },
+  { to: '/usage',    icon: '◌', label: 'Usage' },
+]
 
-// Disabled (Sprint 10+) — rendered as non-interactive spans
-const disabledLinks = [
-  { to: '/agents/:slug', icon: '◎', label: 'Agent Detail' },
-  { to: '/sops',         icon: '◈', label: 'SOPs' },
-  { to: '/projects',     icon: '▣', label: 'Projects' },
-  { to: '/org',          icon: '⬡', label: 'Org Chart' },
-] as const
+// Disabled (future sprint) — rendered as non-interactive spans
+const disabledLinks: Array<{ to: string; icon: string; label: string }> = []
 
 function isActive(to: string): boolean {
   if (to === '/') return route.path === '/'

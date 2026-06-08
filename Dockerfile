@@ -78,6 +78,36 @@ USER node
 # Health endpoint (HEALTH_PORT — default 3000)
 EXPOSE 3000
 
+# -----------------------------------------------------------------------
+# Stage 3 — prebuilt-runtime
+#
+# Skips the TypeScript build — designed for local Docker deployments where
+# dist/ is already compiled on the host and bind-mounted into the container.
+# Used by docker-compose.yml squad-api and mcp-gateway services.
+#
+# Usage:
+#   Build: docker compose build (no TypeScript compile — fast)
+#   dist/ is bind-mounted from host at runtime: ./dist:/app/dist:ro
+# -----------------------------------------------------------------------
+FROM node:22-alpine AS prebuilt-runtime
+
+WORKDIR /app
+
+ENV NODE_ENV=production
+
+# Install production dependencies only — no source copy, no compile.
+# --ignore-scripts: skip prepare/husky hooks (devDependency, not available here).
+COPY package*.json ./
+RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
+
+# squad.manifest.json — operators override with a volume mount
+COPY squad.manifest.json ./
+
+# Run as non-root
+USER node
+
+EXPOSE 3000
+
 # MCP server reads from stdin / writes to stdout (StdioServerTransport).
 # Clients connect via docker exec -i or a stdio bridge.
 # Keep stdin open by starting docker-compose with stdin_open: true.

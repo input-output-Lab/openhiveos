@@ -73,6 +73,14 @@
       "skills": [],
       "owns": ["data-analytics", "reporting", "dashboards"],
       "works_with": ["elizabeth", "nova", "murphy"]
+    },
+    {
+      "slug": "scout",
+      "name": "Scout",
+      "role": "QA Engineer",
+      "skills": ["frontend-test-coverage", "code-review", "bug-triage", "release-readiness"],
+      "owns": ["test-coverage", "quality-gates", "release-sign-off", "regression-detection"],
+      "works_with": ["murphy", "rocket", "elizabeth"]
     }
   ]
 }

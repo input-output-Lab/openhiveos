@@ -1,34 +1,45 @@
 /**
  * packages/mcp-gateway/src/index.ts
  *
- * OpenHiveOS mcp-gateway — Express SSE bridge.
+ * OpenHiveOS mcp-gateway — MCP HTTP + SSE bridge.
  *
- * Exposes the MCP server subprocess as an SSE endpoint for external
- * Bridge integrations (e.g. nova-telegram-bridge, openBridge).
+ * Exposes two transports:
+ *   POST /mcp  — StreamableHTTP (MCP SDK 1.x) — VS Code / Copilot clients
+ *   GET  /sse  — Legacy SSE (MCP SDK 0.x)     — Bridge / openBridge integrations
  *
- * SEC-D1/D2: MCP_GATEWAY_TOKEN auth via ?token= query param, timingSafeEqual.
- * SEC-D3 [CRITICAL]: token is redacted from URL before any log line is written.
+ * ARCH-021 (per-request identity): Bearer token on /mcp is the agent's own
+ * AGENT_TOKEN. The gateway resolves the agent slug via DB lookup and injects
+ * it as __agentSlug into every callTool() call. The subprocess reads it
+ * per-call in GATEWAY_MODE instead of using a boot-time identity closure.
+ *
+ * SEC-D1/D2: auth via per-agent Bearer token (DB lookup) on /mcp.
+ *            Legacy /sse still uses MCP_GATEWAY_TOKEN for Bridge connections.
+ * SEC-D3 [CRITICAL]: token is never logged.
  * SEC-D4: binds to 127.0.0.1 only — never 0.0.0.0.
  * SEC-D7: HEALTH_PORT injected into subprocess env (handled in gateway.ts).
- * SEC-D8: SSE connections block until subprocess is ready (gateway.waitUntilReady).
- * SEC-D9: Rate limit SSE attempts — 10/min per IP, 429 + Retry-After.
+ * SEC-D8: connections block until subprocess is ready (gateway.waitUntilReady).
+ * SEC-D9: rate limits on all authenticated endpoints.
  * SEC-D10: only gateway-scoped env vars consumed here.
+ * SEC-D11: last_used_at updated per resolved agent on each authenticated call.
  */
 import express, { type Request, type Response, type NextFunction } from 'express'
 import rateLimit from 'express-rate-limit'
 import { timingSafeEqual } from 'crypto'
+import { Pool } from 'pg'
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js'
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
 import {
   ListToolsRequestSchema,
   CallToolRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js'
-import { Gateway } from './gateway.js'
+import { Gateway, resolveAgentSlug } from './gateway.js'
 
 // ---------------------------------------------------------------------------
 // Boot-time validation (SEC-D2, SEC-D10)
 // ---------------------------------------------------------------------------
 
+// MCP_GATEWAY_TOKEN is still required for legacy /sse (Bridge) connections.
 const rawToken = process.env['MCP_GATEWAY_TOKEN']
 if (!rawToken || rawToken.length < 64) {
   console.error(
@@ -37,6 +48,17 @@ if (!rawToken || rawToken.length < 64) {
   process.exit(1)
 }
 const TOKEN_BUF = Buffer.from(rawToken, 'utf8')
+
+// ---------------------------------------------------------------------------
+// Database pool — used by resolveAgentSlug for per-request identity (ARCH-021)
+// ---------------------------------------------------------------------------
+
+const dbUrl = process.env['DATABASE_URL']
+if (!dbUrl) {
+  console.error('[mcp-gateway] FATAL: DATABASE_URL must be set')
+  process.exit(1)
+}
+const pool = new Pool({ connectionString: dbUrl })
 
 const PORT = parseInt(process.env['MCP_GATEWAY_PORT'] ?? '3006', 10)
 
@@ -89,14 +111,10 @@ const messageRateLimiter = rateLimit({
 })
 
 /**
- * SEC-D1/D2/D3: validates ?token= with constant-time comparison.
- *
- * The token is extracted and deleted from req.query BEFORE any log output.
- * Express does not log queries by default, but this guard makes the redaction
- * explicit and safe regardless of any logging middleware added in future.
+ * SEC-D1/D2/D3: validates ?token= query param with constant-time comparison.
+ * Used by legacy /sse endpoint.
  */
-function validateToken(req: Request, res: Response, next: NextFunction): void {
-  // SEC-D3: extract and immediately delete from query object before any logging.
+function validateTokenQuery(req: Request, res: Response, next: NextFunction): void {
   const provided = req.query['token']
   // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
   delete req.query['token']
@@ -107,9 +125,6 @@ function validateToken(req: Request, res: Response, next: NextFunction): void {
   }
 
   const providedBuf = Buffer.from(provided, 'utf8')
-
-  // Constant-time comparison (SEC-D2). Lengths must match first to avoid
-  // a timing side-channel on the timingSafeEqual call itself.
   if (
     providedBuf.length !== TOKEN_BUF.length ||
     !timingSafeEqual(providedBuf, TOKEN_BUF)
@@ -121,6 +136,108 @@ function validateToken(req: Request, res: Response, next: NextFunction): void {
   next()
 }
 
+/**
+ * ARCH-021: resolves the calling agent from the Bearer token via DB lookup.
+ * Attaches the resolved agentSlug to res.locals for use in the /mcp handler.
+ * SEC-D3: token value is never logged.
+ */
+async function resolveAgentFromBearer(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  const authHeader = req.headers['authorization']
+
+  if (typeof authHeader !== 'string' || !authHeader.startsWith('Bearer ')) {
+    res.status(401).json({ error: 'Missing or malformed Authorization header' })
+    return
+  }
+
+  const rawBearerToken = authHeader.slice('Bearer '.length)
+  const agentSlug = await resolveAgentSlug(pool, rawBearerToken)
+
+  if (!agentSlug) {
+    res.status(401).json({ error: 'Invalid authentication token' })
+    return
+  }
+
+  res.locals['agentSlug'] = agentSlug
+  next()
+}
+
+// ---------------------------------------------------------------------------
+// POST /mcp — StreamableHTTP transport (VS Code / Copilot clients, MCP SDK 1.x)
+// ---------------------------------------------------------------------------
+
+const mcpRateLimiter = rateLimit({
+  windowMs: 60_000,
+  max: 120,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { error: 'Too many requests. Retry later.' },
+})
+
+app.post('/mcp', mcpRateLimiter, resolveAgentFromBearer, express.json({ limit: '4mb' }), async (req: Request, res: Response) => {
+  await gateway.waitUntilReady()
+
+  // ARCH-021: agentSlug was resolved from the Bearer token by resolveAgentFromBearer.
+  const agentSlug = res.locals['agentSlug'] as string
+
+  const client = gateway.getClient()
+
+  const server = new Server(
+    { name: 'openhiveos-mcp-gateway', version: '1.0.0' },
+    { capabilities: { tools: {} } },
+  )
+
+  server.setRequestHandler(ListToolsRequestSchema, async () => {
+    return client.listTools()
+  })
+
+  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    // ARCH-021: inject __agentSlug into _meta so the subprocess can resolve
+    // identity per-call in GATEWAY_MODE without AGENT_TOKEN.
+    // _meta is a protocol-level sideband — it is NOT subject to tool inputSchema
+    // validation and will not be stripped by z.object() in the MCP SDK parse layer.
+    // Injecting into arguments was incorrect: the SDK's safeParseAsync runs the
+    // tool's inputSchema (z4mini.object, strip mode) and silently removes unknown
+    // keys before the handler receives args — causing the "missing __agentSlug" error.
+    const augmentedParams = {
+      ...request.params,
+      _meta: {
+        ...(request.params._meta ?? {}),
+        __agentSlug: agentSlug,
+      },
+    }
+    return client.callTool(augmentedParams)
+  })
+
+  // Stateless mode: sessionIdGenerator: undefined — no session tracking or validation.
+  // The gateway is a proxy; the upstream MCP subprocess maintains its own state.
+  // Each HTTP request is handled independently. This matches the SDK's stateless pattern.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const transport = new (StreamableHTTPServerTransport as any)({ sessionIdGenerator: undefined })
+
+  res.on('close', () => {
+    void (transport as { close(): Promise<void> }).close()
+  })
+
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
+  await server.connect(transport)
+  // Pass req.body as the pre-parsed JSON object — SDK expects a parsed object, not a Buffer.
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
+  await (transport as any).handleRequest(req, res, req.body)
+})
+
+// ---------------------------------------------------------------------------
+// GET /mcp — reject SSE fallback probe from VS Code MCP client.
+// VS Code falls back to GET /mcp as SSE when POST /mcp returns non-2xx.
+// Return 405 so VS Code gets a clean "not supported" rather than 404 HTML.
+// ---------------------------------------------------------------------------
+app.get('/mcp', (_req: Request, res: Response) => {
+  res.status(405).json({ error: 'SSE transport not supported on /mcp. Use POST /mcp (StreamableHTTP).' })
+})
+
 // ---------------------------------------------------------------------------
 // Session registry (one SSEServerTransport per active Bridge connection)
 // ---------------------------------------------------------------------------
@@ -128,10 +245,10 @@ function validateToken(req: Request, res: Response, next: NextFunction): void {
 const transports = new Map<string, SSEServerTransport>()
 
 // ---------------------------------------------------------------------------
-// GET /sse — establish SSE stream
+// GET /sse — legacy SSE stream (openBridge / Telegram Bridge integrations)
 // ---------------------------------------------------------------------------
 
-app.get('/sse', sseRateLimiter, validateToken, async (req: Request, res: Response) => {
+app.get('/sse', sseRateLimiter, validateTokenQuery, async (req: Request, res: Response) => {
   // SEC-D8: block until subprocess is initialised and tool list is fetched.
   await gateway.waitUntilReady()
 
@@ -169,7 +286,7 @@ app.get('/sse', sseRateLimiter, validateToken, async (req: Request, res: Respons
 // POST /message — receive messages from Bridge SSE client
 // ---------------------------------------------------------------------------
 
-app.post('/message', messageRateLimiter, validateToken, express.raw({ type: '*/*', limit: '1mb' }), async (req: Request, res: Response) => {
+app.post('/message', messageRateLimiter, validateTokenQuery, express.raw({ type: '*/*', limit: '1mb' }), async (req: Request, res: Response) => {
   const sessionId = req.query['sessionId']
 
   if (typeof sessionId !== 'string') {
@@ -187,9 +304,17 @@ app.post('/message', messageRateLimiter, validateToken, express.raw({ type: '*/*
 })
 
 // ---------------------------------------------------------------------------
-// Start — bind to loopback only (SEC-D4)
+// Start
+//
+// SEC-D4: bind to loopback when running on host (default).
+// When running inside Docker the host port mapping (127.0.0.1:PORT->PORT)
+// enforces the loopback constraint at the Docker layer, so 0.0.0.0 is
+// required inside the container for health checks and Compose routing.
+// GATEWAY_BIND env var controls this: set to '0.0.0.0' in docker-compose.yml.
 // ---------------------------------------------------------------------------
 
-app.listen(PORT, '127.0.0.1', () => {
-  console.log(`[mcp-gateway] SSE endpoint listening on 127.0.0.1:${PORT}`)
+const BIND_HOST = process.env['GATEWAY_BIND'] ?? '127.0.0.1'
+
+app.listen(PORT, BIND_HOST, () => {
+  console.log(`[mcp-gateway] Listening on ${BIND_HOST}:${PORT} — /mcp (StreamableHTTP) + /sse (legacy SSE)`)
 })

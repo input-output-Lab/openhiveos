@@ -1,10 +1,24 @@
-import { createHash, timingSafeEqual } from 'node:crypto'
+import { createHash } from 'node:crypto'
 import { config } from '../config.js'
 import { pool } from '../db/client.js'
 import { isValidAgentSlug } from '../squad/manifest.js'
+import { compareTokenHash } from './token-comparison.js'
 
 // ---------------------------------------------------------------------------
-// Process-level agent identity resolution — ARCH-008 Decision 7
+// Agent identity resolution — ARCH-008 Decision 7 + ARCH-021
+//
+// Two modes:
+//
+// 1. Boot-time (standalone): resolveIdentity()
+//    Called once at boot (Step 4 of 6). Reads AGENT_TOKEN from env.
+//    The returned agentSlug is closed over in all handler registrations.
+//    The process halts if resolution fails.
+//
+// 2. Per-call (GATEWAY_MODE): extractGatewaySlug(extra)
+//    Called on every tool invocation when GATEWAY_MODE=true.
+//    Reads __agentSlug from extra._meta (injected by the gateway into the
+//    _meta protocol sideband — NOT from tool arguments).
+//    Throws if __agentSlug is absent or not in squad.manifest.json.
 //
 // Token format: <32-hex-salt>.<64-hex-secret>
 //   Salt:   crypto.randomBytes(16).toString('hex') — 32 hex chars
@@ -12,10 +26,6 @@ import { isValidAgentSlug } from '../squad/manifest.js'
 //   Hash:   SHA-256(salt + secret) stored in agents.token_hash
 //
 // Comparison: timingSafeEqual on Buffer — never === or string comparison.
-// Grace-period rotation: previous_token_hash accepted until previous_token_expires_at.
-//
-// Called once at boot (Step 4 of 6). The returned agentSlug is closed over
-// in all MCP tool handler registrations. The process halts if resolution fails.
 // ---------------------------------------------------------------------------
 
 interface AgentRow {
@@ -87,7 +97,13 @@ async function lookupByHash(
 // returns the agent slug. Throws on any failure — the process must halt.
 // ---------------------------------------------------------------------------
 export async function resolveIdentity(): Promise<string> {
-  const parsed = parseToken(config.AGENT_TOKEN)
+  const rawToken = config.AGENT_TOKEN
+  if (!rawToken) {
+    throw new Error(
+      '[auth] AGENT_TOKEN is not set — cannot resolve identity in standalone mode',
+    )
+  }
+  const parsed = parseToken(rawToken)
   if (!parsed) {
     throw new Error(
       '[auth] AGENT_TOKEN format invalid — expected <32-hex-salt>.<64-hex-secret>',
@@ -128,11 +144,8 @@ export async function resolveIdentity(): Promise<string> {
     throw new Error('[auth] AGENT_TOKEN internal error: matched hash is null')
   }
 
-  const storedHash = Buffer.from(matchedHashHex, 'hex')
-  if (
-    candidateHash.byteLength !== storedHash.byteLength ||
-    !timingSafeEqual(candidateHash, storedHash)
-  ) {
+  // Timing-safe comparison via shared token-comparison module (ARCH-008 universal rule)
+  if (!compareTokenHash(matchedHashHex, candidateHash)) {
     throw new Error('[auth] AGENT_TOKEN constant-time comparison failed')
   }
 
@@ -156,4 +169,39 @@ export async function resolveIdentity(): Promise<string> {
     })
 
   return row.slug
+}
+
+// ---------------------------------------------------------------------------
+// extractGatewaySlug — ARCH-021 per-call identity in GATEWAY_MODE
+//
+// Reads __agentSlug from request._meta (injected by the gateway into the
+// _meta protocol sideband — NOT from tool arguments).
+//
+// Why _meta and not arguments:
+//   The MCP SDK's McpServer.registerTool handler receives args that have
+//   already been parsed by safeParseAsync against the tool's inputSchema
+//   (z4mini.object, Zod v4 strip mode). Unknown keys — including __agentSlug
+//   — are silently removed before the handler is invoked. _meta is part of
+//   request.params and is passed through to handlers via the `extra` second
+//   argument, bypassing inputSchema validation entirely.
+//
+// extra._meta is typed as { [key: string]: unknown } | undefined in the SDK.
+// Throws if __agentSlug is absent or not registered in squad.manifest.json.
+// ---------------------------------------------------------------------------
+export function extractGatewaySlug(extra: { _meta?: Record<string, unknown> }): string {
+  const slug = extra._meta?.['__agentSlug']
+
+  if (typeof slug !== 'string' || slug.length === 0) {
+    throw new Error(
+      '[auth] GATEWAY_MODE: __agentSlug missing from tool call arguments',
+    )
+  }
+
+  if (!isValidAgentSlug(slug)) {
+    throw new Error(
+      `[auth] GATEWAY_MODE: __agentSlug "${slug}" is not registered in squad.manifest.json`,
+    )
+  }
+
+  return slug
 }

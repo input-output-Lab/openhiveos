@@ -1,184 +1,51 @@
-# OpenHiveOS — Local Squad Setup
+# OpenHiveOS — Docker runtime (Homebrew Postgres)
 #
-# Spins up PostgreSQL + pgvector and the OpenHiveOS MCP server
-# for local development and self-hosted use.
+# Runs squad-api and mcp-gateway as Docker containers.
+# PostgreSQL runs on the host via Homebrew — NOT in Docker.
+# Containers reach it via host.docker.internal:5432 (macOS Docker Desktop).
 #
-# Usage:
-#   cp .env.example .env        # fill in POSTGRES_PASSWORD and GEMINI_API_KEY
-#   docker compose up -d        # first run applies the schema automatically
+# Pre-requisites:
+#   - dist/ and packages/mcp-gateway/dist/ must be built:
+#       npm run build
+#       (cd packages/mcp-gateway && npm run build)
+#   - ethos.seal.json must exist at the project root
 #
-# The MCP server communicates via stdio. Connect your MCP client by
-# running: docker compose exec -i mcp node dist/index.js
+# Start:
+#   docker compose up -d
 #
-# The health endpoint is available at http://localhost:${HEALTH_PORT:-3000}
+# Stop and tear down PM2/background processes first — ports 3005 and 3008
+# must be free before starting containers.
 
 name: openhiveos
 
 services:
 
   # ---------------------------------------------------------------------------
-  # PostgreSQL 17 + pgvector
-  # ---------------------------------------------------------------------------
-  postgres:
-    image: pgvector/pgvector:pg17
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB: openhiveos
-      POSTGRES_USER: openhiveos
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U openhiveos -d openhiveos"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-      start_period: 10s
-
-  # ---------------------------------------------------------------------------
-  # Migration runner — idempotent, checks schema before applying
-  # ---------------------------------------------------------------------------
-  migrate:
-    image: pgvector/pgvector:pg17
-    depends_on:
-      postgres:
-        condition: service_healthy
-    environment:
-      PGPASSWORD: ${POSTGRES_PASSWORD}
-    volumes:
-      - ./migrations:/migrations:ro
-    # PRE-A1 gate: apply each migration in order, exactly once.
-    #
-    # Phase 1 — create schema_migrations tracking table (idempotent).
-    # Phase 2 — bootstrap: seed already-applied migrations from schema state
-    #           without re-running them (safe for existing deployments).
-    # Phase 3 — apply every .sql file not yet recorded, in filename order.
-    #
-    # Adding a new migration: drop a numbered .sql file in migrations/.
-    # The gate picks it up automatically on next `docker compose up`.
-    command: |
-      bash -c "
-        set -euo pipefail
-
-        echo '[migrate] Phase 1 — ensuring schema_migrations tracking table...'
-        psql -h postgres -U openhiveos -d openhiveos -c \"
-          CREATE TABLE IF NOT EXISTS schema_migrations (
-            filename   TEXT        PRIMARY KEY,
-            applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-          );
-        \"
-
-        echo '[migrate] Phase 2 — bootstrapping known-applied migrations...'
-        AGENTS=\$$(psql -h postgres -U openhiveos -d openhiveos -tAc \
-          \"SELECT 1 FROM pg_tables WHERE schemaname='public' AND tablename='agents'\")
-        if [ \"\$$AGENTS\" = '1' ]; then
-          psql -h postgres -U openhiveos -d openhiveos -c \
-            \"INSERT INTO schema_migrations (filename) VALUES ('001_init.sql') ON CONFLICT DO NOTHING;\"
-          echo '[migrate] 001_init.sql — bootstrapped (agents table detected)'
-        fi
-
-        PROJECTS=\$$(psql -h postgres -U openhiveos -d openhiveos -tAc \
-          \"SELECT 1 FROM pg_tables WHERE schemaname='public' AND tablename='projects'\")
-        if [ \"\$$PROJECTS\" = '1' ]; then
-          psql -h postgres -U openhiveos -d openhiveos -c \
-            \"INSERT INTO schema_migrations (filename) VALUES ('002_coordination_utilities.sql') ON CONFLICT DO NOTHING;\"
-          echo '[migrate] 002_coordination_utilities.sql — bootstrapped (projects table detected)'
-        fi
-
-        echo '[migrate] Phase 3 — applying pending migrations...'
-        for f in /migrations/*.sql; do
-          name=\$$(basename \"\$$f\")
-          APPLIED=\$$(psql -h postgres -U openhiveos -d openhiveos -tAc \
-            \"SELECT 1 FROM schema_migrations WHERE filename='\$$name'\")
-          if [ \"\$$APPLIED\" = '1' ]; then
-            echo \"[migrate] \$$name — already applied\"
-          else
-            echo \"[migrate] Applying \$$name...\"
-            psql -h postgres -U openhiveos -d openhiveos -f \"\$$f\"
-            psql -h postgres -U openhiveos -d openhiveos -c \
-              \"INSERT INTO schema_migrations (filename) VALUES ('\$$name');\"
-            echo \"[migrate] \$$name — done\"
-          fi
-        done
-
-        echo '[migrate] Migration sequence complete'
-      "
-    restart: "no"
-
-  # ---------------------------------------------------------------------------
-  # OpenHiveOS MCP server
-  # ---------------------------------------------------------------------------
-  mcp:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: production
-    restart: unless-stopped
-    depends_on:
-      postgres:
-        condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
-    stdin_open: true  # Required: keeps stdin open for StdioServerTransport
-    environment:
-      # SEC-7: runtime uses opensquad_app (DML only, no DDL, CONNECTION LIMIT 25).
-      # opensquad_app is created by migration 007_db_roles_sec7.sql.
-      # Set APP_PASSWORD in .env — must differ from POSTGRES_PASSWORD.
-      DATABASE_URL: postgresql://opensquad_app:${APP_PASSWORD}@postgres:5432/openhiveos
-      GEMINI_API_KEY: ${GEMINI_API_KEY}
-      HEALTH_PORT: ${HEALTH_PORT:-3000}
-      # ARCH-013: boot step 3.5 — verifies the Ethos Seal file against DB signature.
-      ETHOS_SEAL_PATH: /ethos-seal/ethos.seal.json
-    ports:
-      - "${HEALTH_PORT:-3000}:3000"
-    volumes:
-      # Mount your Squad's agent roster — override the image default
-      - ./squad.manifest.json:/app/squad.manifest.json:ro
-      # Ethos Seal — read-only at runtime. Written by one-init (init profile).
-      - ${ETHOS_SEAL_DIR:-./ethos-seal}:/ethos-seal:ro
-    healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:3000 | grep -q '\"status\":\"ok\"'"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-      start_period: 20s
-
-  # ---------------------------------------------------------------------------
   # Squad API — HTTP server for the operator dashboard (ARCH-012 A4)
   #
   # Serves the compiled dashboard SPA on / and REST endpoints on /api/*.
   # Bound to 127.0.0.1 on the host — never expose 0.0.0.0 without a TLS
-  # reverse proxy in front (SEC-A3). Internal Compose alias: squad-api:3005.
+  # reverse proxy in front (SEC-A3).
+  #
+  # DATABASE_URL: uses host.docker.internal so the container can reach the
+  # Homebrew Postgres on the macOS host (Docker Desktop macOS requirement).
   # ---------------------------------------------------------------------------
   squad-api:
     build:
       context: .
       dockerfile: Dockerfile
-      target: production
-      # S8-04 Path B (Docker Hub / CI distribution): pass the dashboard bearer
-      # token as a build arg so the dashboard-build Dockerfile stage can bake
-      # it into the Vite bundle at compile time.
-      #
-      # For install.sh (Path A) this arg is supplied by:
-      #   docker compose build --build-arg VITE_DASHBOARD_AGENT_TOKEN=<token>
-      #
-      # SEC-D3: token is baked into the image layer and visible via
-      # 'docker history'. Do NOT push this image to a public registry.
-      # SEC-D2: when building in CI/CD, pass the token exclusively via a
-      # masked GitHub Actions secret — never hardcode in workflow files.
-      args:
-        VITE_DASHBOARD_AGENT_TOKEN: ${VITE_DASHBOARD_AGENT_TOKEN:-}
+      # prebuilt-runtime: skips TypeScript compile — dist/ is bind-mounted
+      # from the host at runtime. Run `npm run build` on the host before
+      # starting this service to ensure dist/ is current.
+      target: prebuilt-runtime
     command: ["node", "dist/squad-api/index.js"]
     restart: unless-stopped
-    depends_on:
-      postgres:
-        condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
+    extra_hosts:
+      # macOS Docker Desktop: reach host Postgres via this alias
+      - "host.docker.internal:host-gateway"
     environment:
-      DATABASE_URL: postgresql://opensquad_app:${APP_PASSWORD}@postgres:5432/openhiveos # gitleaks:allow
-      # SEC-7: runtime services use opensquad_app (DML only, CONNECTION LIMIT 25).
-      # Do NOT use POSTGRES_PASSWORD here — that belongs to the migrate service only.
+      # Points to Homebrew Postgres on the macOS host (not a Docker container).
+      DATABASE_URL: postgresql://openhiveos:${POSTGRES_PASSWORD}@host.docker.internal:5432/openhiveos # gitleaks:allow
       SQUAD_API_PORT: ${SQUAD_API_PORT:-3005}
       # Must be 0.0.0.0 inside the container so Compose health checks and
       # internal routing work. Host binding below keeps external exposure to
@@ -189,26 +56,143 @@ services:
       # PRE-2 GATE: port 3005 confirmed free on production host.
       # Reverse proxy entry required before exposing publicly.
       - "127.0.0.1:${SQUAD_API_PORT:-3005}:${SQUAD_API_PORT:-3005}"
+    volumes:
+      # Pre-compiled host dist/ — avoids a TypeScript build step inside Docker.
+      # Re-run `npm run build` on the host whenever src/ changes.
+      - ./dist:/app/dist:ro
+      - ./squad.manifest.json:/app/squad.manifest.json:ro
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:${SQUAD_API_PORT:-3005}/health | grep -q '\"status\":\"ok\"'"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3005/health 2>/dev/null | grep -q 'status'"]
       interval: 15s
       timeout: 5s
       retries: 3
       start_period: 20s
 
   # ---------------------------------------------------------------------------
-  # Ethos Seal init — Stage 1 of canonical operator onboarding (ARCH-013 B6)
+  # MCP Gateway — StreamableHTTP + SSE bridge (ARCH-016)
   #
-  # Generates and stores the Ethos Seal. Run ONCE before provisioning agents.
-  # Writes the seal JSON to the ETHOS_SEAL_DIR bind mount on the host so
-  # operators can back it up independently of the container lifecycle.
+  # Exposes:
+  #   POST /mcp  — StreamableHTTP (MCP SDK 1.x) — VS Code / Copilot clients
+  #   GET  /sse  — Legacy SSE (MCP SDK 0.x)     — Bridge / openBridge
+  #
+  # The MCP server (dist/index.js) is spawned as a subprocess by the gateway
+  # via StdioClientTransport — it does NOT need its own Compose service.
+  # dist/ is bind-mounted at /mcp-server so the subprocess node binary path
+  # resolves to /mcp-server/index.js.
+  #
+  # Port assignments (locked):
+  #   3008 → gateway HTTP (/mcp + /sse)        — MCP_GATEWAY_PORT
+  #   3009 → MCP subprocess health endpoint    — HEALTH_PORT (injected into child)
+  #
+  # SEC-D1/D2: MCP_GATEWAY_TOKEN auth — timingSafeEqual, 64 hex chars min
+  # SEC-D3: ?token= redacted from logs (gateway application layer)
+  # SEC-D4: host port bound to 127.0.0.1 only — never 0.0.0.0
+  # SEC-D5: MCP_GATEWAY_TOKEN registered in gitleaks.toml
+  # SEC-D6: one AGENT_TOKEN = one agent identity
+  # SEC-D8: gateway blocks connections until subprocess listTools() succeeds
+  # SEC-D9: rate limit 10 SSE connections/min (express-rate-limit in gateway)
+  # SEC-D10: env vars scoped — OPENHIVEOS_INGESTION_TOKEN is NOT included
+  # ---------------------------------------------------------------------------
+  openhiveos-mcp-gateway:
+    build:
+      context: .
+      dockerfile: packages/mcp-gateway/Dockerfile
+      args:
+        MCP_VERSION: "0.2.0"
+    restart: unless-stopped
+    extra_hosts:
+      # macOS Docker Desktop: reach host Postgres via this alias
+      - "host.docker.internal:host-gateway"
+    environment:
+      # Points to Homebrew Postgres on the macOS host (not a Docker container).
+      DATABASE_URL: postgresql://openhiveos:${POSTGRES_PASSWORD}@host.docker.internal:5432/openhiveos # gitleaks:allow
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      # ARCH-021: AGENT_TOKEN is NOT set here. The gateway resolves agent identity
+      # per-request from the Bearer token via DB lookup and injects __agentSlug
+      # into each callTool() call. The subprocess runs in GATEWAY_MODE.
+      GATEWAY_MODE: "true"
+      # SEC-D1/D2: authentication token for legacy /sse endpoint (Bridge connections).
+      # /mcp now uses per-agent Bearer tokens resolved against the agents table.
+      MCP_GATEWAY_TOKEN: ${MCP_GATEWAY_TOKEN}
+      # Gateway HTTP port — container listens on this port and host maps it 1:1
+      MCP_GATEWAY_PORT: ${MCP_GATEWAY_PORT:-3008}
+      # HEALTH_PORT is injected into the spawned MCP subprocess env (gateway.ts).
+      # Must differ from MCP_GATEWAY_PORT to avoid listener collision.
+      HEALTH_PORT: ${HEALTH_PORT:-3009}
+      # Absolute path to MCP server binary inside the container (bind-mounted below).
+      # /mcp-app mirrors the project root layout so node module resolution works:
+      #   /mcp-app/dist/index.js  ← the spawned binary
+      #   /mcp-app/node_modules/  ← host deps (bind-mounted from ./node_modules)
+      MCP_BINARY_PATH: /mcp-app/dist/index.js
+      # ARCH-013: Ethos Seal verification on MCP server boot
+      ETHOS_SEAL_PATH: /ethos-seal/ethos.seal.json
+      # SEC-D4: 0.0.0.0 inside the container — Docker host port mapping
+      # (127.0.0.1:3008->3008) enforces loopback at the network layer.
+      GATEWAY_BIND: "0.0.0.0"
+    ports:
+      # SEC-D4: 127.0.0.1 loopback binding — never 0.0.0.0.
+      # VS Code MCP client connects via http://127.0.0.1:3008/mcp
+      - "127.0.0.1:${MCP_GATEWAY_PORT:-3008}:${MCP_GATEWAY_PORT:-3008}"
+    volumes:
+      # MCP server binary — bind-mount host dist/ at /mcp-app/dist.
+      # Rebuild with `npm run build` on the host when source changes.
+      - ./dist:/mcp-app/dist:ro
+      # Host node_modules — the spawned MCP subprocess resolves @modelcontextprotocol/sdk
+      # and other deps from here. Must mirror the host project layout.
+      - ./node_modules:/mcp-app/node_modules:ro
+      # Agent roster
+      - ./squad.manifest.json:/mcp-app/squad.manifest.json:ro
+      # Agent roster for gateway process (it reads it too)
+      - ./squad.manifest.json:/app/squad.manifest.json:ro
+      # Ethos Seal — read-only. ethos.seal.json lives at the project root.
+      - ./ethos.seal.json:/ethos-seal/ethos.seal.json:ro
+    healthcheck:
+      # Two-layer check: /health returns 200 only after subprocess listTools() succeeds.
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:${MCP_GATEWAY_PORT:-3008}/health 2>/dev/null | grep -q '\"status\":\"ok\"'"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  # ---------------------------------------------------------------------------
+  # MCP server — stdio transport for VS Code / Copilot (ARCH-008)
+  #
+  # Not on the normal `docker compose up` path — VS Code spawns it on demand:
+  #   docker compose run --rm -i mcp
+  #
+  # Uses the prebuilt-runtime stage (bind-mounted host dist/).
+  # Connects to Homebrew Postgres on the host via host.docker.internal.
+  # Ethos Seal bind-mounted read-only from the project root.
+  # ---------------------------------------------------------------------------
+  mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: prebuilt-runtime
+    command: ["node", "dist/index.js"]
+    restart: "no"
+    stdin_open: true
+    tty: false
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      DATABASE_URL: postgresql://openhiveos:${POSTGRES_PASSWORD}@host.docker.internal:5432/openhiveos # gitleaks:allow
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      AGENT_TOKEN: ${AGENT_TOKEN}
+      ETHOS_SEAL_PATH: /ethos-seal/ethos.seal.json
+      HEALTH_PORT: ${HEALTH_PORT:-3009}
+    volumes:
+      - ./dist:/app/dist:ro
+      - ./node_modules:/app/node_modules:ro
+      - ./squad.manifest.json:/app/squad.manifest.json:ro
+      - ./seeds:/app/seeds:ro
+      - ./ethos.seal.json:/ethos-seal/ethos.seal.json:ro
+
+  # ---------------------------------------------------------------------------
+  # Ethos Seal init — Stage 1 of canonical operator onboarding (ARCH-013 B6)
   #
   # Not on the normal `docker compose up` path (profiles: ["init"]).
   # Invocation: docker compose --profile init run --rm one-init
-  #
-  # Stage ordering:
-  #   Stage 1 — one-init   (this service) — initialise the Ethos Seal
-  #   Stage 2 — provision  (next service) — provision agent tokens
   # ---------------------------------------------------------------------------
   one-init:
     build:
@@ -218,33 +202,20 @@ services:
     command: ["node", "dist/scripts/one-init.js"]
     profiles: ["init"]
     restart: "no"
-    depends_on:
-      postgres:
-        condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
-      DATABASE_URL: postgresql://opensquad_app:${APP_PASSWORD}@postgres:5432/openhiveos # gitleaks:allow
-      # SEC-7: runtime services use opensquad_app (DML only, CONNECTION LIMIT 25).
-      # Do NOT use POSTGRES_PASSWORD here — that belongs to the migrate service only.
+      DATABASE_URL: postgresql://openhiveos:${POSTGRES_PASSWORD}@host.docker.internal:5432/openhiveos # gitleaks:allow
       ETHOS_SEAL_SECRET: ${ETHOS_SEAL_SECRET}
       ETHOS_SEAL_PATH: /ethos-seal/ethos.seal.json
     volumes:
-      # rw — one-init creates the seal file here. ETHOS_SEAL_DIR must exist
-      # on the host before running. Use an absolute path in production.
       - ${ETHOS_SEAL_DIR:-./ethos-seal}:/ethos-seal:rw
 
   # ---------------------------------------------------------------------------
   # Agent provision — Stage 2 of canonical operator onboarding (ARCH-014 C5)
   #
-  # Provisions bearer tokens for all agents defined in squad.manifest.json.
-  # Writes tokens to PROVISION_ENV_DIR/.env.tokens on the host.
-  # Reads the Ethos Seal (ro) — fails fast if one-init has not run.
-  #
   # Not on the normal `docker compose up` path (profiles: ["init"]).
   # Invocation: docker compose --profile init run --rm provision
-  #
-  # Run Stage 1 first: docker compose --profile init run --rm one-init
   # ---------------------------------------------------------------------------
   provision:
     build:
@@ -254,98 +225,12 @@ services:
     command: ["node", "dist/scripts/provision-all-agents.js", "--all", "--write-env", "/provision/.env.tokens"]
     profiles: ["init"]
     restart: "no"
-    depends_on:
-      postgres:
-        condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
-      DATABASE_URL: postgresql://opensquad_app:${APP_PASSWORD}@postgres:5432/openhiveos # gitleaks:allow
-      # SEC-7: runtime services use opensquad_app (DML only, CONNECTION LIMIT 25).
-      # Do NOT use POSTGRES_PASSWORD here — that belongs to the migrate service only.
+      DATABASE_URL: postgresql://openhiveos:${POSTGRES_PASSWORD}@host.docker.internal:5432/openhiveos # gitleaks:allow
       ETHOS_SEAL_PATH: /ethos-seal/ethos.seal.json
       PROVISION_ENV_DIR: /provision
     volumes:
-      # Seal — read-only. Stage 1 must have run first.
-      - ${ETHOS_SEAL_DIR:-./ethos-seal}:/ethos-seal:ro
-      # Tokens output — rw bind mount so .env.tokens lands on host disk.
-      # PROVISION_ENV_DIR must exist on the host before running.
+      - ./ethos.seal.json:/ethos-seal/ethos.seal.json:ro
       - ${PROVISION_ENV_DIR:-./provision}:/provision:rw
-
-  # ---------------------------------------------------------------------------
-  # MCP Gateway — Stage 6 of canonical operator onboarding (ARCH-016)
-  #
-  # Exposes the MCP stdio server as an SSE endpoint for external Bridge
-  # integrations (nova-telegram-bridge, openBridge). Runs under the
-  # `integration` Compose profile — not started by default.
-  #
-  # Activation: docker compose --profile integration up -d openhiveos-mcp-gateway
-  #
-  # Topology A (loopback): Bridge connects via http://127.0.0.1:${MCP_GATEWAY_PORT:-3006}
-  # Topology B (Compose co-deploy): Bridge connects via http://openhiveos-mcp-gateway:3006
-  #
-  # SEC-D1/D2: MCP_GATEWAY_TOKEN auth — timingSafeEqual, 64 hex chars min
-  # SEC-D3: ?token= redacted from logs before SSE upgrade (gateway application layer)
-  # SEC-D4: ports binds to 127.0.0.1 only — never 0.0.0.0 (v1.1 amendment)
-  # SEC-D5: MCP_GATEWAY_TOKEN registered in gitleaks.toml
-  # SEC-D6: one AGENT_TOKEN = one agent identity (nova is the agent)
-  # SEC-D7: HEALTH_PORT=3007 (distinct from standalone mcp container port 3000)
-  # SEC-D8: gateway blocks SSE until subprocess listTools() succeeds
-  # SEC-D9: rate limit 10 SSE connections/min (express-rate-limit in gateway)
-  # SEC-D10: env vars scoped — OPENHIVEOS_INGESTION_TOKEN is NOT included
-  # ---------------------------------------------------------------------------
-  openhiveos-mcp-gateway:
-    build:
-      context: .
-      dockerfile: packages/mcp-gateway/Dockerfile
-      args:
-        # Pin MCP server version at build time — must match standalone mcp container.
-        # CI/CD updates this ARG on every mcp-server binary change to prevent drift.
-        MCP_VERSION: "0.2.0"
-    profiles: ["integration"]
-    restart: unless-stopped
-    depends_on:
-      postgres:
-        condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
-    environment:
-      DATABASE_URL: postgresql://opensquad_app:${APP_PASSWORD}@postgres:5432/openhiveos # gitleaks:allow
-      # SEC-7: runtime services use opensquad_app (DML only, CONNECTION LIMIT 25).
-      # Do NOT use POSTGRES_PASSWORD here — that belongs to the migrate service only.
-      GEMINI_API_KEY: ${GEMINI_API_KEY}
-      AGENT_TOKEN: ${AGENT_TOKEN}
-      # SEC-D1/D2: authentication token for Bridge SSE connections (64 hex chars)
-      MCP_GATEWAY_TOKEN: ${MCP_GATEWAY_TOKEN}
-      # SEC-D4: internal SSE port — host-bound to 127.0.0.1 below
-      MCP_GATEWAY_PORT: ${MCP_GATEWAY_PORT:-3006}
-      # SEC-D7: subprocess health port — must differ from standalone mcp (3000)
-      HEALTH_PORT: ${GATEWAY_HEALTH_PORT:-3007}
-      # Path to the MCP server binary inside the container (mounted via volume below)
-      MCP_BINARY_PATH: /mcp-server/index.js
-      # Ethos Seal — same path convention as standalone mcp container
-      ETHOS_SEAL_PATH: /ethos-seal/ethos.seal.json
-    ports:
-      # SEC-D4 (v1.1): 127.0.0.1 loopback binding — never 0.0.0.0.
-      # PM2/systemd consumers connect via http://127.0.0.1:${MCP_GATEWAY_PORT:-3006}
-      - "127.0.0.1:${MCP_GATEWAY_PORT:-3006}:3006"
-    volumes:
-      # MCP server binary — built from the main Dockerfile production target.
-      # Run `docker compose build mcp` before starting the gateway to ensure dist/ is current.
-      - ./dist:/mcp-server:ro
-      # Agent roster — same manifest as standalone mcp container
-      - ./squad.manifest.json:/app/squad.manifest.json:ro
-      # Ethos Seal — read-only at runtime. Written by one-init (init profile).
-      - ${ETHOS_SEAL_DIR:-./ethos-seal}:/ethos-seal:ro
-    healthcheck:
-      # Two-layer check: HTTP GET /health reflects subprocess readiness (SEC-D8).
-      # Layer 1 — HTTP endpoint returns 200 only after listTools() succeeds.
-      # Layer 2 — wget exit code propagates subprocess liveness to Compose.
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:${MCP_GATEWAY_PORT:-3006}/health 2>/dev/null | grep -q '\"status\":\"ok\"'"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-      start_period: 30s
-
-volumes:
-  postgres_data:

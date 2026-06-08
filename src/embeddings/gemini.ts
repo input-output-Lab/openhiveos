@@ -12,13 +12,35 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-function getModel() {
+// ---------------------------------------------------------------------------
+// Module-level singleton for GoogleGenerativeAI client (TASK-1721)
+//
+// Previously, a new GoogleGenerativeAI instance was created on every
+// embedContent() call, leading to high latency and redundant client
+// instantiation overhead. This singleton pattern ensures one instance
+// per module load, reused for all embedding calls.
+//
+// Lazy initialization: client is initialized on first embedContent() call.
+// ---------------------------------------------------------------------------
+let modelInstance: ReturnType<
+  InstanceType<typeof GoogleGenerativeAI>['getGenerativeModel']
+> | null = null
+
+function getModel(): ReturnType<
+  InstanceType<typeof GoogleGenerativeAI>['getGenerativeModel']
+> {
+  if (modelInstance) {
+    return modelInstance
+  }
+
   const key = process.env['GEMINI_API_KEY']
   if (!key) {
     throw new Error('GEMINI_API_KEY environment variable is required')
   }
+
   const genai = new GoogleGenerativeAI(key)
-  return genai.getGenerativeModel({ model: 'gemini-embedding-001' })
+  modelInstance = genai.getGenerativeModel({ model: 'gemini-embedding-001' })
+  return modelInstance
 }
 
 export async function embedContent(text: string): Promise<number[]> {

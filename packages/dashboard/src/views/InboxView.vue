@@ -61,7 +61,12 @@
         <li
           v-for="task in tasks"
           :key="task.id"
-          class="flex items-center gap-3 px-6 py-3.5 hover:bg-gray-50/60 transition-colors group"
+          class="flex items-center gap-3 px-6 py-3.5 hover:bg-gray-50/60 transition-colors group cursor-pointer"
+          role="button"
+          tabindex="0"
+          :aria-label="`View details for task: ${task.title}`"
+          @click="selectedTaskId = task.id"
+          @keydown.enter.space="selectedTaskId = task.id"
         >
           <!-- Status badge -->
           <DataBadge :variant="statusVariant(task.status)" class="flex-shrink-0">
@@ -128,6 +133,9 @@
       </div>
     </div>
   </div>
+
+  <!-- Task peek drawer -->
+  <TaskPeek :task-id="selectedTaskId" @close="selectedTaskId = null" />
 </template>
 
 <script setup lang="ts">
@@ -139,6 +147,7 @@ import PageHeader from '../components/PageHeader.vue'
 import EmptyState from '../components/EmptyState.vue'
 import ErrorState from '../components/ErrorState.vue'
 import DataBadge from '../components/DataBadge.vue'
+import TaskPeek from '../components/TaskPeek.vue'
 
 // ─── Filter strip ─────────────────────────────────────────────────────────────
 
@@ -152,6 +161,10 @@ const STATUS_FILTERS: { label: string; value: TaskStatus | null }[] = [
 ]
 
 const activeFilter = ref<TaskStatus | null>(null)
+
+// ─── Peek drawer ──────────────────────────────────────────────────────────────
+
+const selectedTaskId = ref<number | null>(null)
 
 function setFilter(value: TaskStatus | null) {
   if (activeFilter.value === value) return

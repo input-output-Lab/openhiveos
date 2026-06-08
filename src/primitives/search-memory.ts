@@ -22,7 +22,9 @@ export async function handleSearchMemory(input: SearchMemoryInput) {
   const embedding = await embedContent(sanitized.clean_query)
 
   // Step 3: Vector retrieval — fetch more candidates than requested for BM25 to rerank
-  const fetchLimit = Math.min(parsed.limit * 3, 20)
+  // Note: fetchLimit maintains 3× over-fetch ratio for all limit values (TASK-1722).
+  // Previously capped at 20, which degraded BM25 signal above limit=6. Now capped at 60.
+  const fetchLimit = Math.min(parsed.limit * 3, 60)
   const candidates = await searchMemory({
     embedding,
     limit: fetchLimit,

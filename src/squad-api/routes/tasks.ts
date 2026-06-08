@@ -194,4 +194,73 @@ router.get('/', async (req, res) => {
   }
 })
 
+// ---------------------------------------------------------------------------
+// GET /api/tasks/:id  (S10-BE-04)
+// Returns a single task by primary key.
+// 400 on non-positive-integer id.
+// 404 (opaque) if the id does not exist.
+// ---------------------------------------------------------------------------
+
+router.get('/:id', async (req, res) => {
+  const rawId = req.params.id
+  const id = parseInt(rawId, 10)
+
+  if (!Number.isInteger(id) || id < 1) {
+    res.status(400).json({ error: 'id must be a positive integer' })
+    return
+  }
+
+  try {
+    const result = await withReaderRole(async (client) => {
+      return client.query<TaskDbRow>(
+        `SELECT t.id,
+                t.project_id,
+                p.slug AS project_slug,
+                t.title,
+                t.description,
+                t.status,
+                t.assignee_agent_slug,
+                t.github_pr_url,
+                t.notes,
+                t.created_at,
+                t.updated_at
+           FROM tasks t
+           LEFT JOIN projects p ON p.id = t.project_id
+          WHERE t.id = $1`,
+        [id],
+      )
+    })
+
+    if (result.rows.length === 0) {
+      res.status(404).json({ error: 'Task not found' })
+      return
+    }
+
+    const row = result.rows[0] as TaskDbRow
+
+    res.json({
+      task: {
+        id: parseInt(row.id, 10),
+        project_id: parseInt(row.project_id, 10),
+        project_slug: row.project_slug,
+        title: row.title,
+        description: row.description,
+        status: row.status,
+        assignee_agent_slug: row.assignee_agent_slug,
+        github_pr_url: row.github_pr_url,
+        notes: row.notes,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+      },
+    })
+  } catch (err) {
+    let message = 'Unknown error'
+    if (err instanceof Error) {
+      message = err.message
+    }
+    console.error('[squad-api/tasks] Detail query failed:', message)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
 export { router as tasksRouter, VALID_TASK_STATUSES }

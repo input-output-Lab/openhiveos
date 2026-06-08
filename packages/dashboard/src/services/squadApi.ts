@@ -4,9 +4,15 @@ import type {
   EthosSealResponse,
   AgentsResponse,
   AgentDetail,
+  AgentDetailResponse,
   AgentMonthRow,
   TaskCostRow,
   TasksResponse,
+  TaskDetailResponse,
+  ProjectsResponse,
+  ProjectDetailResponse,
+  SprintsResponse,
+  SopsResponse,
 } from '../types/api'
 
 // ---------------------------------------------------------------------------
@@ -96,8 +102,8 @@ export function getAgents(): Promise<AgentsResponse> {
 }
 
 /** Agent detail — DB row + manifest role composite. 404 → SquadApiError(NOT_FOUND). */
-export function getAgentBySlug(slug: string): Promise<AgentDetail> {
-  return request<AgentDetail>(`/api/agents/${encodeURIComponent(slug)}`)
+export function getAgentBySlug(slug: string): Promise<AgentDetailResponse> {
+  return request<AgentDetailResponse>(`/api/agents/${encodeURIComponent(slug)}`)
 }
 
 // ─── Ethos Seal ───────────────────────────────────────────────────────────────
@@ -170,4 +176,63 @@ export function getTasks(params: GetTasksParams = {}): Promise<TasksResponse> {
   if (params.offset != null)                 q.set('offset', String(params.offset))
   const qs = q.toString()
   return request<TasksResponse>(`/api/tasks${qs ? `?${qs}` : ''}`)
+}
+
+/** Single task by id — includes description. 404 → SquadApiError(NOT_FOUND). */
+export function getTaskById(id: number): Promise<TaskDetailResponse> {
+  return request<TaskDetailResponse>(`/api/tasks/${id}`)
+}
+
+// ─── Projects ──────────────────────────────────────────────────────────────────
+
+export interface GetProjectsParams {
+  status?: 'active' | 'archived'
+  owner?: string
+  limit?: number
+  offset?: number
+}
+
+/** Paginated project list. Defaults to status=active. */
+export function getProjects(params: GetProjectsParams = {}): Promise<ProjectsResponse> {
+  const q = new URLSearchParams()
+  if (params.status)         q.set('status', params.status)
+  if (params.owner)          q.set('owner', params.owner)
+  if (params.limit != null)  q.set('limit', String(params.limit))
+  if (params.offset != null) q.set('offset', String(params.offset))
+  const qs = q.toString()
+  return request<ProjectsResponse>(`/api/projects${qs ? `?${qs}` : ''}`)
+}
+
+/** Project detail with open_task_count + current_sprint. 404 → SquadApiError(NOT_FOUND). */
+export function getProjectBySlug(slug: string): Promise<ProjectDetailResponse> {
+  return request<ProjectDetailResponse>(`/api/projects/${encodeURIComponent(slug)}`)
+}
+
+/** Paginated sprint history for a project. 404 → SquadApiError(NOT_FOUND) if project not found. */
+export function getProjectSprints(slug: string, params: { limit?: number; offset?: number } = {}): Promise<SprintsResponse> {
+  const q = new URLSearchParams()
+  if (params.limit != null)  q.set('limit', String(params.limit))
+  if (params.offset != null) q.set('offset', String(params.offset))
+  const qs = q.toString()
+  return request<SprintsResponse>(`/api/projects/${encodeURIComponent(slug)}/sprints${qs ? `?${qs}` : ''}`)
+}
+
+// ─── SOPs ──────────────────────────────────────────────────────────────────────
+
+export interface GetSopsParams {
+  category?: string
+  agent?: string
+  limit?: number
+  offset?: number
+}
+
+/** Paginated SOP list. category must match VALID_CATEGORIES on server. */
+export function getSops(params: GetSopsParams = {}): Promise<SopsResponse> {
+  const q = new URLSearchParams()
+  if (params.category)       q.set('category', params.category)
+  if (params.agent)          q.set('agent', params.agent)
+  if (params.limit != null)  q.set('limit', String(params.limit))
+  if (params.offset != null) q.set('offset', String(params.offset))
+  const qs = q.toString()
+  return request<SopsResponse>(`/api/sops${qs ? `?${qs}` : ''}`)
 }

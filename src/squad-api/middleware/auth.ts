@@ -1,5 +1,6 @@
-import { createHash } from 'node:crypto'
 import type { Request, Response, NextFunction } from 'express'
+import { createHash } from 'node:crypto'
+import { compareTokenHash } from '../../auth/token-comparison.js'
 import { withReaderRole } from '../db.js'
 
 // ---------------------------------------------------------------------------
@@ -29,6 +30,7 @@ declare global {
 
 interface AgentRow {
   slug: string
+  token_hash: string
 }
 
 const TOKEN_REGEX = /^[\da-f]{32}\.[\da-f]{64}$/i
@@ -63,7 +65,7 @@ export async function authMiddleware(req: Request, res: Response, next: NextFunc
   try {
     row = await withReaderRole(async (client) => {
       const result = await client.query<AgentRow>(
-        `SELECT slug
+        `SELECT slug, token_hash
            FROM agents
           WHERE token_hash = $1
             AND active = true
@@ -80,6 +82,21 @@ export async function authMiddleware(req: Request, res: Response, next: NextFunc
   }
 
   if (!row) {
+    unauthorized(res)
+    return
+  }
+
+  // Defence-in-depth: timing-safe comparison via shared token-comparison module (ARCH-008 universal rule).
+  // Even though the WHERE clause already matched, verify with constant-time comparison to prevent
+  // timing-side-channel attacks on token verification (SEC-A6).
+  try {
+    if (!compareTokenHash(row.token_hash, hashHex)) {
+      unauthorized(res)
+      return
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    console.error('[squad-api/auth] Hash comparison error:', message)
     unauthorized(res)
     return
   }

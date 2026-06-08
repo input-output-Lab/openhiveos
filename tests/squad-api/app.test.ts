@@ -15,7 +15,7 @@
  * vi.mock calls are hoisted before static imports by Vitest, so all modules
  * that transitively import config.js or db.js see the mock at import time.
  *
- * Coverage targets (S7-09):
+ * Coverage targets (S7-09, S10-BE-01-04):
  *   GET  /health               — unauthenticated probe                (TC-SA1)
  *   GET  /api/usage/agents     — 401 no token, 401 bad token, 200 ok (TC-SA2-SA4)
  *   GET  /api/usage/agents/:n  — 200 ok                              (TC-SA5)
@@ -24,6 +24,12 @@
  *   POST /internal/usage       — 401 no token, 401 bad token, 200 ok (TC-SA8-SA10)
  *   GET  /api/agents/:slug     — 200 ok, 404 not found               (TC-SA11-SA12)
  *   GET  /api/sops             — 200 ok, filters, pagination          (TC-SA13-SA16)
+ *   GET  /api/tasks            — shape, filters, pagination           (TC-SA17-SA20)
+ *   GET  /api/thoughts         — shape, filters, pagination           (TC-SA21-SA24)
+ *   GET  /api/projects         — shape, status filter, pagination     (TC-SA25-SA27)
+ *   GET  /api/projects/:slug   — detail, 404                         (TC-SA28-SA29)
+ *   GET  /api/projects/:s/sprints — empty list, 404                  (TC-SA30)
+ *   GET  /api/tasks/:id        — detail, 400, 404                    (TC-SA31)
  */
 
 import { vi, describe, it, expect, beforeAll, afterAll } from 'vitest'
@@ -610,5 +616,248 @@ describe('GET /api/thoughts', () => {
     for (const t of surfacedThoughts) {
       expect((t as Record<string, unknown>)['must_surface']).toBe(true)
     }
+  })
+})
+
+// =============================================================================
+// GET /api/projects (S10-BE-01)
+// =============================================================================
+describe('GET /api/projects', () => {
+  it('TC-SA25: returns 200 with data array and meta envelope', async () => {
+    const app = createSquadApiApp()
+    const res = await request(app)
+      .get('/api/projects')
+      .set('Authorization', `Bearer ${VALID_TOKEN}`)
+    expect(res.status).toBe(200)
+    // Response shape: { data: ProjectRow[], meta: { limit, offset, has_more } }
+    expect(Array.isArray(res.body.data)).toBe(true)
+    expect(res.body.meta).toBeDefined()
+    expect(typeof res.body.meta.limit).toBe('number')
+    expect(typeof res.body.meta.offset).toBe('number')
+    expect(typeof res.body.meta.has_more).toBe('boolean')
+  })
+
+  it('TC-SA26: each project row has expected shape — no detail-only columns', async () => {
+    // Ensure test project exists (active)
+    const projectRes = await db.pool.query<{ id: number }>(
+      `INSERT INTO projects (slug, name, owner_agent_slug, status)
+       VALUES ('squad-test-project', 'Squad Test Project', 'squad-test-agent', 'active')
+       ON CONFLICT (slug) DO NOTHING
+       RETURNING id`,
+    )
+    const _id: number = projectRes.rows[0]?.id
+      ?? (await db.pool.query<{ id: number }>(
+            `SELECT id FROM projects WHERE slug = 'squad-test-project'`,
+          )).rows[0]!.id
+    void _id
+
+    const app = createSquadApiApp()
+    const res = await request(app)
+      .get('/api/projects?status=active')
+      .set('Authorization', `Bearer ${VALID_TOKEN}`)
+    expect(res.status).toBe(200)
+
+    const projects: unknown[] = res.body.data
+    expect(projects.length).toBeGreaterThan(0)
+
+    const project = projects[0] as Record<string, unknown>
+    expect(typeof project['id']).toBe('number')
+    expect(typeof project['slug']).toBe('string')
+    expect(typeof project['name']).toBe('string')
+    expect(typeof project['status']).toBe('string')
+    expect('description' in project).toBe(true)
+    expect('owner_agent_slug' in project).toBe(true)
+    expect('created_at' in project).toBe(true)
+    expect('updated_at' in project).toBe(true)
+    // open_task_count and current_sprint belong to the detail route only
+    expect('open_task_count' in project).toBe(false)
+    expect('current_sprint' in project).toBe(false)
+  })
+
+  it('TC-SA27: status filter validated; pagination bounds enforced', async () => {
+    const app = createSquadApiApp()
+
+    const activeRes = await request(app)
+      .get('/api/projects?status=active')
+      .set('Authorization', `Bearer ${VALID_TOKEN}`)
+    expect(activeRes.status).toBe(200)
+
+    const archivedRes = await request(app)
+      .get('/api/projects?status=archived')
+      .set('Authorization', `Bearer ${VALID_TOKEN}`)
+    expect(archivedRes.status).toBe(200)
+
+    const badStatus = await request(app)
+      .get('/api/projects?status=deleted')
+      .set('Authorization', `Bearer ${VALID_TOKEN}`)
+    expect(badStatus.status).toBe(400)
+    expect(badStatus.body.error).toMatch(/Invalid status/)
+
+    const badLimit = await request(app)
+      .get('/api/projects?limit=0')
+      .set('Authorization', `Bearer ${VALID_TOKEN}`)
+    expect(badLimit.status).toBe(400)
+
+    const badOffset = await request(app)
+      .get('/api/projects?offset=-1')
+      .set('Authorization', `Bearer ${VALID_TOKEN}`)
+    expect(badOffset.status).toBe(400)
+  })
+})
+
+// =============================================================================
+// GET /api/projects/:slug (S10-BE-02)
+// =============================================================================
+describe('GET /api/projects/:slug', () => {
+  it('TC-SA28: returns 200 with project detail — open_task_count integer, current_sprint shape', async () => {
+    // Ensure the test project exists
+    const projectRes = await db.pool.query<{ id: number }>(
+      `INSERT INTO projects (slug, name, owner_agent_slug, status)
+       VALUES ('squad-test-project', 'Squad Test Project', 'squad-test-agent', 'active')
+       ON CONFLICT (slug) DO NOTHING
+       RETURNING id`,
+    )
+    const projectId: number = projectRes.rows[0]?.id
+      ?? (await db.pool.query<{ id: number }>(
+            `SELECT id FROM projects WHERE slug = 'squad-test-project'`,
+          )).rows[0]!.id
+
+    // Seed a sprint so current_sprint is non-null
+    await db.pool.query(
+      `INSERT INTO sprints (project_id, sprint_number, sprint_goal)
+       VALUES ($1, 1, 'Test sprint goal')
+       ON CONFLICT (project_id, sprint_number) DO NOTHING`,
+      [projectId],
+    )
+
+    const app = createSquadApiApp()
+    const res = await request(app)
+      .get('/api/projects/squad-test-project')
+      .set('Authorization', `Bearer ${VALID_TOKEN}`)
+    expect(res.status).toBe(200)
+
+    const body = res.body as { project: Record<string, unknown> }
+    expect(body.project).toBeDefined()
+
+    const p = body.project
+    expect(typeof p['id']).toBe('number')
+    expect(p['slug']).toBe('squad-test-project')
+    expect(typeof p['name']).toBe('string')
+    // open_task_count: integer, never null (SEC-C6)
+    expect(typeof p['open_task_count']).toBe('number')
+    expect(Number.isInteger(p['open_task_count'])).toBe(true)
+    // current_sprint: non-null because we seeded sprint 1
+    expect(p['current_sprint']).not.toBeNull()
+    const sprint = p['current_sprint'] as Record<string, unknown>
+    expect(typeof sprint['sprint_number']).toBe('number')
+    expect('sprint_goal' in sprint).toBe(true)
+    expect('started_at' in sprint).toBe(true)
+  })
+
+  it('TC-SA29: returns 404 for a slug that does not exist', async () => {
+    const app = createSquadApiApp()
+    const res = await request(app)
+      .get('/api/projects/nonexistent-project-xyz-99')
+      .set('Authorization', `Bearer ${VALID_TOKEN}`)
+    expect(res.status).toBe(404)
+    expect(res.body).toMatchObject({ error: 'Project not found' })
+  })
+})
+
+// =============================================================================
+// GET /api/projects/:slug/sprints (S10-BE-03)
+// =============================================================================
+describe('GET /api/projects/:slug/sprints', () => {
+  it('TC-SA30: returns 200 with sprint list and meta; 404 for unknown slug', async () => {
+    const app = createSquadApiApp()
+
+    // squad-test-project has at least sprint 1 from TC-SA28
+    const res = await request(app)
+      .get('/api/projects/squad-test-project/sprints')
+      .set('Authorization', `Bearer ${VALID_TOKEN}`)
+    expect(res.status).toBe(200)
+    expect(Array.isArray(res.body.data)).toBe(true)
+    expect(res.body.meta).toBeDefined()
+    expect(typeof res.body.meta.limit).toBe('number')
+    expect(typeof res.body.meta.has_more).toBe('boolean')
+
+    if (res.body.data.length > 0) {
+      const sprint = res.body.data[0] as Record<string, unknown>
+      expect(typeof sprint['sprint_number']).toBe('number')
+      expect('sprint_goal' in sprint).toBe(true)
+      expect('started_at' in sprint).toBe(true)
+    }
+
+    // Unknown slug → 404
+    const notFound = await request(app)
+      .get('/api/projects/no-such-project-abc/sprints')
+      .set('Authorization', `Bearer ${VALID_TOKEN}`)
+    expect(notFound.status).toBe(404)
+    expect(notFound.body).toMatchObject({ error: 'Project not found' })
+  })
+})
+
+// =============================================================================
+// GET /api/tasks/:id (S10-BE-04)
+// =============================================================================
+describe('GET /api/tasks/:id', () => {
+  it('TC-SA31: returns task detail on valid id; 404 on missing id; 400 on non-integer id', async () => {
+    // Fetch the task seeded in TC-SA18
+    const taskRes = await db.pool.query<{ id: string }>(
+      `SELECT t.id FROM tasks t
+         JOIN projects p ON p.id = t.project_id
+        WHERE p.slug = 'squad-test-project'
+          AND t.assignee_agent_slug = 'squad-test-agent'
+        LIMIT 1`,
+    )
+    // pg returns BIGINT as a string; parse to number to match the route's parseInt output
+    const seededId: number | undefined = taskRes.rows[0]?.id !== undefined
+      ? parseInt(taskRes.rows[0].id, 10)
+      : undefined
+
+    const app = createSquadApiApp()
+
+    if (seededId !== undefined) {
+      const res = await request(app)
+        .get(`/api/tasks/${String(seededId)}`)
+        .set('Authorization', `Bearer ${VALID_TOKEN}`)
+      expect(res.status).toBe(200)
+
+      const body = res.body as { task: Record<string, unknown> }
+      expect(body.task).toBeDefined()
+
+      const t = body.task
+      expect(t['id']).toBe(seededId)
+      expect(typeof t['project_id']).toBe('number')
+      expect('project_slug' in t).toBe(true)
+      expect(typeof t['title']).toBe('string')
+      expect('description' in t).toBe(true)
+      expect(typeof t['status']).toBe('string')
+      expect('assignee_agent_slug' in t).toBe(true)
+      expect('github_pr_url' in t).toBe(true)
+      expect('notes' in t).toBe(true)
+      expect('created_at' in t).toBe(true)
+      expect('updated_at' in t).toBe(true)
+    }
+
+    // 404 — id far beyond seeded range
+    const notFound = await request(app)
+      .get('/api/tasks/999999999')
+      .set('Authorization', `Bearer ${VALID_TOKEN}`)
+    expect(notFound.status).toBe(404)
+    expect(notFound.body).toMatchObject({ error: 'Task not found' })
+
+    // 400 — non-integer path segment
+    const badId = await request(app)
+      .get('/api/tasks/not-an-id')
+      .set('Authorization', `Bearer ${VALID_TOKEN}`)
+    expect(badId.status).toBe(400)
+    expect(badId.body.error).toMatch(/positive integer/)
+
+    // 400 — zero is not a valid primary key
+    const zeroId = await request(app)
+      .get('/api/tasks/0')
+      .set('Authorization', `Bearer ${VALID_TOKEN}`)
+    expect(zeroId.status).toBe(400)
   })
 })

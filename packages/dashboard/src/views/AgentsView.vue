@@ -76,7 +76,12 @@
           <tr
             v-for="agent in agentsData!.agents"
             :key="agent.slug"
-            class="border-b border-gray-50 last:border-0 hover:bg-gray-50/50 transition-colors"
+            class="border-b border-gray-50 last:border-0 hover:bg-gray-50/50 transition-colors cursor-pointer"
+            role="button"
+            tabindex="0"
+            :aria-label="`View details for ${agent.display_name}`"
+            @click="selectedSlug = agent.slug"
+            @keydown.enter.space="selectedSlug = agent.slug"
           >
             <!-- Agent name + slug -->
             <td class="px-5 py-3">
@@ -113,10 +118,13 @@
       </table>
     </div>
   </div>
+
+  <!-- Agent peek drawer -->
+  <AgentPeek :slug="selectedSlug" @close="selectedSlug = null" />
 </template>
 
 <script setup lang="ts">
-import { onMounted, computed } from 'vue'
+import { onMounted, computed, ref } from 'vue'
 import { getEthosSeal, getAgents } from '../services/squadApi'
 import { useApi } from '../composables/useApi'
 import CardSkeleton from '../components/CardSkeleton.vue'
@@ -125,6 +133,11 @@ import PageHeader from '../components/PageHeader.vue'
 import StatusAura from '../components/StatusAura.vue'
 import EmptyState from '../components/EmptyState.vue'
 import DataBadge from '../components/DataBadge.vue'
+import AgentPeek from '../components/AgentPeek.vue'
+
+// ─── Peek drawer ──────────────────────────────────────────────────────────────
+
+const selectedSlug = ref<string | null>(null)
 
 // Seal metadata
 const { data: sealData, loading: sealLoading, error: sealError, run: runSeal } = useApi(getEthosSeal)

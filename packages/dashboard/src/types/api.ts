@@ -74,8 +74,12 @@ export interface AgentRow {
   active_task_count: number       // SEC-C6: LEFT JOIN tasks, COALESCE to 0
 }
 
+// ARCH-020: manifest includes role, skills, owns, works_with (TC-SA11b)
 export interface AgentManifest {
   role: string
+  skills: string[]
+  owns: string[]
+  works_with: string[]
 }
 
 export interface AgentDetail extends AgentRow {
@@ -84,6 +88,10 @@ export interface AgentDetail extends AgentRow {
 
 export interface AgentsResponse {
   agents: AgentRow[]
+}
+
+export interface AgentDetailResponse {
+  agent: AgentDetail
 }
 
 // ─── Usage / LLM cost ─────────────────────────────────────────────────────────
@@ -136,4 +144,83 @@ export interface TasksResponse {
     offset: number
     has_more: boolean
   }
+}
+
+/** GET /api/tasks/:id — single task with full fields */
+export interface TaskDetail extends TaskRow {
+  // All fields already present on TaskRow — alias for semantic clarity
+}
+
+export interface TaskDetailResponse {
+  task: TaskDetail
+}
+
+// ─── Projects ─────────────────────────────────────────────────────────────────
+
+export type ProjectStatus = 'active' | 'archived'
+
+export interface ProjectRow {
+  id: number
+  slug: string
+  name: string
+  description: string | null
+  status: ProjectStatus
+  owner_agent_slug: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface ProjectMeta {
+  limit: number
+  offset: number
+  has_more: boolean
+}
+
+export interface ProjectsResponse {
+  data: ProjectRow[]
+  meta: ProjectMeta
+}
+
+export interface SprintSummary {
+  sprint_number: number
+  sprint_goal: string | null
+  started_at: string | null
+}
+
+export interface ProjectDetail extends ProjectRow {
+  open_task_count: number
+  current_sprint: SprintSummary | null
+}
+
+export interface ProjectDetailResponse {
+  project: ProjectDetail
+}
+
+export interface SprintsResponse {
+  data: SprintSummary[]
+  meta: ProjectMeta
+}
+
+// ─── SOPs ─────────────────────────────────────────────────────────────────────
+
+export interface SopRow {
+  id: number
+  source_path: string | null
+  display_name: string
+  category: string
+  agent: string | null
+  preview: string
+  created_at: string
+  updated_at: string
+}
+
+export interface SopsPagination {
+  limit: number
+  offset: number
+  has_more: boolean
+}
+
+export interface SopsResponse {
+  sops: SopRow[]
+  pagination: SopsPagination
 }

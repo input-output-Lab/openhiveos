@@ -12,6 +12,7 @@ import { internalRouter } from './routes/internal.js'
 import { usageRouter } from './routes/usage.js'
 import { sopsRouter } from './routes/sops.js'
 import { tasksRouter } from './routes/tasks.js'
+import { projectsRouter } from './routes/projects.js'
 import { thoughtsRouter } from './routes/thoughts.js'
 
 // ---------------------------------------------------------------------------
@@ -106,10 +107,19 @@ export function createSquadApiApp(): express.Application {
   app.use('/api/sops', sopsRouter)
 
   // GET /api/tasks — task roster, paginated (ARCH-019 S9-BE-01)
+  // GET /api/tasks/:id — task detail with description (ARCH-019 S10-BE-04)
   // Auth enforced upstream by authMiddleware on /api/*.
   // LEFT JOIN projects for project_slug — avoids extra round-trips in InboxView.
   // VALID_TASK_STATUSES allowlist enforced in handler (SEC-C3).
   app.use('/api/tasks', tasksRouter)
+
+  // GET /api/projects — project roster, paginated (ARCH-019 S10-BE-01)
+  // GET /api/projects/:slug — project detail with open_task_count + current_sprint (S10-BE-02)
+  // GET /api/projects/:slug/sprints — sprint history, paginated (S10-BE-03)
+  // Auth enforced upstream by authMiddleware on /api/*.
+  // VALID_PROJECT_STATUSES allowlist enforced in handler (SEC-C3).
+  // OPEN_TASK_STATUSES allowlist enforced in handler (SEC-C6).
+  app.use('/api/projects', projectsRouter)
 
   // GET /api/thoughts — thought roster, paginated (ARCH-019 S9-BE-04)
   // Auth enforced upstream by authMiddleware on /api/*.

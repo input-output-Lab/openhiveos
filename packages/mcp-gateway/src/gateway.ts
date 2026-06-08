@@ -7,9 +7,112 @@
  * SEC-D7: HEALTH_PORT injected into subprocess env at spawn time.
  * SEC-D8: readyPromise resolves only after listTools() succeeds —
  *         the SSE endpoint blocks until this promise resolves.
+ *
+ * ARCH-021 (per-request identity): Gateway resolves agentSlug from the
+ * caller's Bearer token via DB lookup and injects it into every callTool()
+ * call as __agentSlug. The subprocess reads it per-call in GATEWAY_MODE.
  */
+import { createHash, timingSafeEqual } from 'node:crypto'
+import { Pool } from 'pg'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
+
+// ---------------------------------------------------------------------------
+// Per-request agent identity resolution — ARCH-021
+//
+// Same hash algorithm as src/auth/identity.ts:
+//   Token format: <32-hex-salt>.<64-hex-secret>
+//   Hash: SHA-256(salt + secret) → compare against agents.token_hash
+// ---------------------------------------------------------------------------
+
+const ALLOWED_TOKEN_COLUMNS = new Set(['token_hash', 'previous_token_hash'])
+
+function parseToken(raw: string): { salt: string; secret: string } | null {
+  const dot = raw.indexOf('.')
+  if (dot === -1) return null
+  const salt = raw.slice(0, dot)
+  const secret = raw.slice(dot + 1)
+  if (salt.length !== 32 || secret.length !== 64) return null
+  if (!/^[\da-f]+$/i.test(salt) || !/^[\da-f]+$/i.test(secret)) return null
+  return { salt, secret }
+}
+
+function computeHash(salt: string, secret: string): string {
+  return createHash('sha256').update(salt + secret).digest('hex')
+}
+
+interface AgentRow {
+  slug: string
+  token_hash: string
+  previous_token_hash: string | null
+  active: boolean
+  expires_at: Date | null
+}
+
+async function lookupAgent(
+  pool: Pool,
+  hashHex: string,
+  column: 'token_hash' | 'previous_token_hash',
+): Promise<AgentRow | null> {
+  if (!ALLOWED_TOKEN_COLUMNS.has(column)) return null
+  const gracePeriodClause =
+    column === 'previous_token_hash' ? 'AND previous_token_expires_at > NOW()' : ''
+  const { rows } = await pool.query<AgentRow>(
+    `SELECT slug, token_hash, previous_token_hash, active, expires_at
+       FROM agents
+      WHERE ${column} = $1
+        AND active = true
+        ${gracePeriodClause}
+      LIMIT 1`,
+    [hashHex],
+  )
+  return rows[0] ?? null
+}
+
+/**
+ * resolveAgentSlug — resolves the agent slug from a raw Bearer token value.
+ * Returns the slug string or null if the token is invalid/unrecognised.
+ * SEC-D11: updates last_used_at fire-and-forget (non-blocking).
+ */
+export async function resolveAgentSlug(pool: Pool, rawToken: string): Promise<string | null> {
+  const parsed = parseToken(rawToken)
+  if (!parsed) return null
+
+  const hashHex = computeHash(parsed.salt, parsed.secret)
+  const candidateHashBuf = Buffer.from(hashHex, 'hex')
+
+  let row = await lookupAgent(pool, hashHex, 'token_hash')
+  let usingGracePeriod = false
+
+  if (!row) {
+    row = await lookupAgent(pool, hashHex, 'previous_token_hash')
+    usingGracePeriod = true
+  }
+
+  if (!row) return null
+
+  // Defence-in-depth: constant-time comparison after indexed lookup
+  const matchedHashHex = usingGracePeriod ? row.previous_token_hash : row.token_hash
+  if (!matchedHashHex) return null
+
+  const storedBuf = Buffer.from(matchedHashHex, 'hex')
+  if (
+    candidateHashBuf.byteLength !== storedBuf.byteLength ||
+    !timingSafeEqual(candidateHashBuf, storedBuf)
+  ) {
+    return null
+  }
+
+  // Token expiry
+  if (row.expires_at !== null && row.expires_at <= new Date()) return null
+
+  // Update last_used_at — fire and forget
+  void pool
+    .query('UPDATE agents SET last_used_at = NOW() WHERE slug = $1', [row.slug])
+    .catch(() => { /* non-fatal */ })
+
+  return row.slug
+}
 
 export class Gateway {
   private readonly client: Client
@@ -59,6 +162,9 @@ export class Gateway {
       env: {
         ...process.env as Record<string, string>,
         HEALTH_PORT: healthPort,
+        // ARCH-021: signal to the subprocess that identity comes per-call
+        // via __agentSlug injected in callTool() arguments, not AGENT_TOKEN.
+        GATEWAY_MODE: 'true',
       },
     })
 
