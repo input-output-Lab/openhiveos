@@ -118,7 +118,7 @@ export async function checkEthosSeal(): Promise<void> {
     process.exit(1)
   }
 
-  console.log('[ethos-seal] Ethos Seal verified — boot continuing')
+  console.error('[ethos-seal] Ethos Seal verified — boot continuing')
 }
 
 // ---------------------------------------------------------------------------

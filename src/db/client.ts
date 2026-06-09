@@ -17,7 +17,7 @@ export async function connectDb(): Promise<void> {
   const client = await pool.connect()
   try {
     await client.query('SELECT 1')
-    console.log('[db] Connected to Postgres')
+    console.error('[db] Connected to Postgres')
   } finally {
     client.release()
   }

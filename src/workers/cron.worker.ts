@@ -57,7 +57,7 @@ export class CronWorker {
   start(): void {
     if (this.running) return
     this.running = true
-    console.log('[cron-worker] Started — polling every 30s')
+    console.error('[cron-worker] Started — polling every 30s')
     void this.poll()
   }
 
@@ -67,7 +67,7 @@ export class CronWorker {
       clearTimeout(this.timer)
       this.timer = null
     }
-    console.log('[cron-worker] Stopped')
+    console.error('[cron-worker] Stopped')
   }
 
   // ---------------------------------------------------------------------------

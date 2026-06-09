@@ -13,5 +13,5 @@ const host = process.env['SQUAD_API_HOST'] ?? '127.0.0.1'
 const port = squadApiConfig.SQUAD_API_PORT
 
 app.listen(port, host, () => {
-  console.log(`[squad-api] Listening on http://${host}:${String(port)}`)
+  console.error(`[squad-api] Listening on http://${host}:${String(port)}`)
 })

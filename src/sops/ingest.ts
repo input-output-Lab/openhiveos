@@ -175,7 +175,7 @@ export async function runSopIngest(seedsRoot: string): Promise<IngestStats> {
 
     // Decision 9: skip draft SOPs
     if (data.status === 'draft') {
-      console.log('[sop-ingest] Skipping draft SOP: %s', absolutePath)
+      console.error('[sop-ingest] Skipping draft SOP: %s', absolutePath)
       stats.skipped++
       continue
     }
@@ -238,7 +238,7 @@ export async function runSopIngest(seedsRoot: string): Promise<IngestStats> {
          VALUES ($1, $2, $3::vector, $4, $5, $6)`,
         [category, instruction, JSON.stringify(embedding), sourcePath, contentHash, namespace],
       )
-      console.log(
+      console.error(
         '[sop-ingest] INSERTED | source_path=%s | namespace=%s | category=%s',
         sourcePath,
         namespace,
@@ -254,7 +254,7 @@ export async function runSopIngest(seedsRoot: string): Promise<IngestStats> {
          WHERE source_path = $6`,
         [category, instruction, JSON.stringify(embedding), contentHash, namespace, sourcePath],
       )
-      console.log(
+      console.error(
         '[sop-ingest] UPDATED  | source_path=%s | namespace=%s | category=%s',
         sourcePath,
         namespace,
@@ -281,7 +281,7 @@ export async function runSopIngest(seedsRoot: string): Promise<IngestStats> {
     }
   }
 
-  console.log(
+  console.error(
     '[sop-ingest] Done — inserted=%d updated=%d skipped=%d warned=%d errored=%d',
     stats.inserted,
     stats.updated,

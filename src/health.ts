@@ -82,6 +82,6 @@ export function startHealthServer(): void {
   })
 
   server.listen(config.HEALTH_PORT, () => {
-    console.log(`[health] Listening on port ${String(config.HEALTH_PORT)}`)
+    console.error(`[health] Listening on port ${String(config.HEALTH_PORT)}`)
   })
 }

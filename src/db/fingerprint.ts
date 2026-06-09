@@ -64,5 +64,5 @@ export async function checkFingerprint(): Promise<void> {
     )
   }
 
-  console.log('[fingerprint] Schema OK — all required tables and extensions present')
+  console.error('[fingerprint] Schema OK — all required tables and extensions present')
 }
