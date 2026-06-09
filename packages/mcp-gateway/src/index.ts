@@ -186,7 +186,7 @@ app.post('/mcp', mcpRateLimiter, resolveAgentFromBearer, express.json({ limit: '
   const client = gateway.getClient()
 
   const server = new Server(
-    { name: 'openhiveos-mcp-gateway', version: '1.0.0' },
+    { name: `openhiveos-${agentSlug}`, version: '1.0.0' },
     { capabilities: { tools: {} } },
   )
 

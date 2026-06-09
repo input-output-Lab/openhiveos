@@ -99,6 +99,7 @@ services:
       dockerfile: packages/mcp-gateway/Dockerfile
       args:
         MCP_VERSION: "0.2.0"
+    hostname: mcp-gateway
     restart: unless-stopped
     extra_hosts:
       # macOS Docker Desktop: reach host Postgres via this alias
@@ -114,6 +115,8 @@ services:
       # SEC-D1/D2: authentication token for legacy /sse endpoint (Bridge connections).
       # /mcp now uses per-agent Bearer tokens resolved against the agents table.
       MCP_GATEWAY_TOKEN: ${MCP_GATEWAY_TOKEN}
+      # ARCH-015: LLM usage reporting token — inherited by spawned MCP subprocess
+      OPENHIVEOS_INGESTION_TOKEN: ${OPENHIVEOS_INGESTION_TOKEN}
       # Gateway HTTP port — container listens on this port and host maps it 1:1
       MCP_GATEWAY_PORT: ${MCP_GATEWAY_PORT:-3008}
       # HEALTH_PORT is injected into the spawned MCP subprocess env (gateway.ts).
@@ -181,6 +184,8 @@ services:
       AGENT_TOKEN: ${AGENT_TOKEN}
       ETHOS_SEAL_PATH: /ethos-seal/ethos.seal.json
       HEALTH_PORT: ${HEALTH_PORT:-3009}
+      # ARCH-015: LLM usage reporting token
+      OPENHIVEOS_INGESTION_TOKEN: ${OPENHIVEOS_INGESTION_TOKEN}
     volumes:
       - ./dist:/app/dist:ro
       - ./node_modules:/app/node_modules:ro
