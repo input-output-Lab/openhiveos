@@ -71,6 +71,10 @@ CREATE TABLE projects (
   description      TEXT,
   status           TEXT        NOT NULL DEFAULT 'active',
   owner_agent_slug TEXT        NOT NULL REFERENCES agents(slug),
+  business_value   INT         CHECK (business_value IN (1, 3, 5)),
+  strategic_fit    INT         CHECK (strategic_fit IN (1, 3, 5)),
+  effort           INT         CHECK (effort IN (1, 3, 5)),
+  risk_index       INT         DEFAULT 1 CHECK (risk_index BETWEEN 1 AND 5),
   created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 

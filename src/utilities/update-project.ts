@@ -6,6 +6,10 @@ export const updateProjectSchema = z.object({
   name: z.string().min(1).max(200).optional(),
   description: z.string().max(2000).optional(),
   status: z.enum(['active', 'archived']).optional(),
+  business_value: z.number().int().optional(),
+  strategic_fit: z.number().int().optional(),
+  effort: z.number().int().optional(),
+  risk_index: z.number().int().optional(),
 })
 
 export type UpdateProjectInput = z.infer<typeof updateProjectSchema>
@@ -21,6 +25,10 @@ export async function handleUpdateProject(input: UpdateProjectInput, agentSlug: 
     ...(parsed.name !== undefined ? { name: parsed.name } : {}),
     ...(parsed.description !== undefined ? { description: parsed.description } : {}),
     ...(parsed.status !== undefined ? { status: parsed.status } : {}),
+    ...(parsed.business_value !== undefined ? { business_value: parsed.business_value } : {}),
+    ...(parsed.strategic_fit !== undefined ? { strategic_fit: parsed.strategic_fit } : {}),
+    ...(parsed.effort !== undefined ? { effort: parsed.effort } : {}),
+    ...(parsed.risk_index !== undefined ? { risk_index: parsed.risk_index } : {}),
   })
   if (!result) {
     return {

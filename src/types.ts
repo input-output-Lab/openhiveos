@@ -91,6 +91,11 @@ export interface Project {
   description: string | null
   status: ProjectStatus
   owner_agent_slug: string
+  business_value: number | null
+  strategic_fit: number | null
+  effort: number | null
+  risk_index: number
+  roi_score?: number
   created_at: Date
   updated_at: Date
 }

@@ -46,6 +46,10 @@ Creates a new project. The calling agent becomes the owner.
 | `slug` | string | ✅ | 2–80 chars | Lowercase alphanumeric and hyphens only. No leading or trailing hyphens. Must be unique across the Squad Instance. Example: `openhiveos`, `client-abc-sprint-1` |
 | `name` | string | ✅ | 1–200 chars | Human-readable project name |
 | `description` | string | — | max 2 000 chars | Optional description |
+| `business_value` | integer | — | 1, 3, or 5 | Required for Matrix prioritization |
+| `strategic_fit` | integer | — | 1, 3, or 5 | Required for Matrix prioritization |
+| `effort` | integer | — | 1, 3, or 5 | Required for Matrix prioritization |
+| `risk_index` | integer | — | 1–5 | Technical risk (default 1) |
 
 You do not supply `status` on creation. New projects always start as `active`.  
 You do not supply `owner_agent_slug`. The server injects this from your bearer token.
@@ -60,6 +64,10 @@ You do not supply `owner_agent_slug`. The server injects this from your bearer t
   "description": null,
   "status": "active",
   "owner_agent_slug": "murphy",
+  "business_value": 5,
+  "strategic_fit": 5,
+  "effort": 1,
+  "risk_index": 1,
   "created_at": "2026-05-20T10:00:00Z",
   "updated_at": "2026-05-20T10:00:00Z"
 }
@@ -88,8 +96,12 @@ Updates the name, description, or status of a project you own.
 | `name` | string | — | 1–200 chars | Omit to leave unchanged |
 | `description` | string | — | max 2 000 chars | Omit to leave unchanged |
 | `status` | string | — | `active` or `archived` | Omit to leave unchanged |
+| `business_value` | integer | — | 1, 3, or 5 | Omit to leave unchanged |
+| `strategic_fit` | integer | — | 1, 3, or 5 | Omit to leave unchanged |
+| `effort` | integer | — | 1, 3, or 5 | Omit to leave unchanged |
+| `risk_index` | integer | — | 1–5 | Omit to leave unchanged |
 
-All three update fields are optional. Supplying none of them is valid but will set `updated_at` without changing any visible data.
+All update fields are optional. Supplying none of them is valid but will set `updated_at` without changing any visible data.
 
 **Success response:** Full `Project` object (same shape as `create_project` success).
 
@@ -126,6 +138,11 @@ Lists projects. No ownership scoping is applied by default — you can see all p
     "description": null,
     "status": "active",
     "owner_agent_slug": "murphy",
+    "business_value": 5,
+    "strategic_fit": 5,
+    "effort": 1,
+    "risk_index": 1,
+    "roi_score": 25.0,
     "created_at": "2026-05-20T10:00:00Z",
     "updated_at": "2026-05-20T10:00:00Z"
   }
@@ -158,6 +175,11 @@ Returns a project and all its tasks in a single response. Includes task counts b
   "description": null,
   "status": "active",
   "owner_agent_slug": "murphy",
+  "business_value": 5,
+  "strategic_fit": 5,
+  "effort": 1,
+  "risk_index": 1,
+  "roi_score": 25.0,
   "created_at": "2026-05-20T10:00:00Z",
   "updated_at": "2026-05-20T10:00:00Z",
   "todo_count": 3,

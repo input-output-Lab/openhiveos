@@ -20,12 +20,25 @@ export async function createProject(params: {
   name: string
   description?: string
   owner_agent_slug: string
+  business_value?: number
+  strategic_fit?: number
+  effort?: number
+  risk_index?: number
 }): Promise<Project> {
   const result = await pool.query<Project>(
-    `INSERT INTO projects (slug, name, description, owner_agent_slug)
-     VALUES ($1, $2, $3, $4)
-     RETURNING id, slug, name, description, status, owner_agent_slug, created_at, updated_at`,
-    [params.slug, params.name, params.description ?? null, params.owner_agent_slug],
+    `INSERT INTO projects (slug, name, description, owner_agent_slug, business_value, strategic_fit, effort, risk_index)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+     RETURNING id, slug, name, description, status, owner_agent_slug, business_value, strategic_fit, effort, risk_index, created_at, updated_at`,
+    [
+      params.slug, 
+      params.name, 
+      params.description ?? null, 
+      params.owner_agent_slug,
+      params.business_value ?? null,
+      params.strategic_fit ?? null,
+      params.effort ?? null,
+      params.risk_index ?? 1
+    ],
   )
   const row = result.rows[0]
   if (!row) throw new Error('[db] INSERT INTO projects returned no row')
@@ -44,20 +57,32 @@ export async function updateProject(params: {
   name?: string
   description?: string
   status?: string
+  business_value?: number
+  strategic_fit?: number
+  effort?: number
+  risk_index?: number
 }): Promise<Project | undefined> {
   const result = await pool.query<Project>(
     `UPDATE projects
-     SET name        = COALESCE($3, name),
-         description = COALESCE($4, description),
-         status      = COALESCE($5, status)
+     SET name           = COALESCE($3, name),
+         description    = COALESCE($4, description),
+         status         = COALESCE($5, status),
+         business_value = COALESCE($6, business_value),
+         strategic_fit  = COALESCE($7, strategic_fit),
+         effort         = COALESCE($8, effort),
+         risk_index     = COALESCE($9, risk_index)
      WHERE id = $1 AND owner_agent_slug = $2
-     RETURNING id, slug, name, description, status, owner_agent_slug, created_at, updated_at`,
+     RETURNING id, slug, name, description, status, owner_agent_slug, business_value, strategic_fit, effort, risk_index, created_at, updated_at`,
     [
       params.project_id,
       params.owner_agent_slug,
       params.name ?? null,
       params.description ?? null,
       params.status ?? null,
+      params.business_value ?? null,
+      params.strategic_fit ?? null,
+      params.effort ?? null,
+      params.risk_index ?? null,
     ],
   )
   return result.rows[0]
@@ -86,10 +111,13 @@ export async function queryProjects(
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
 
   const result = await pool.query<Project>(
-    `SELECT id, slug, name, description, status, owner_agent_slug, created_at, updated_at
+    `SELECT id, slug, name, description, status, owner_agent_slug, 
+            business_value, strategic_fit, effort, risk_index,
+            (business_value * strategic_fit)::FLOAT / effort AS roi_score,
+            created_at, updated_at
      FROM projects
      ${where}
-     ORDER BY created_at DESC`,
+     ORDER BY (business_value * strategic_fit)::FLOAT / effort DESC NULLS LAST, created_at DESC`,
     values,
   )
   return result.rows
@@ -117,6 +145,8 @@ export async function getProjectBoard(params: {
   >(
     `SELECT
        p.id, p.slug, p.name, p.description, p.status, p.owner_agent_slug,
+       p.business_value, p.strategic_fit, p.effort, p.risk_index,
+       (p.business_value * p.strategic_fit)::FLOAT / p.effort AS roi_score,
        p.created_at, p.updated_at,
        COUNT(t.id) FILTER (WHERE t.status = 'todo')   AS todo_count,
        COUNT(t.id) FILTER (WHERE t.status = 'wip')    AS wip_count,

@@ -63,9 +63,9 @@ const bootSlug: string | null = gatewayMode
   : await resolveIdentity() // halts process on failure in standalone mode
 
 if (gatewayMode) {
-  console.log('[identity] GATEWAY_MODE: per-call identity resolution active')
+  console.error('[identity] GATEWAY_MODE: per-call identity resolution active')
 } else {
-  console.log(`[identity] Standalone mode: agent resolved as "${String(bootSlug)}"`)
+  console.error(`[identity] Standalone mode: agent resolved as "${String(bootSlug)}"`)
 }
 
 startHealthServer()         // Step 5
@@ -151,19 +151,19 @@ server.registerTool('search_sops', { description: 'Semantic search over Factory 
 // ---------------------------------------------------------------------------
 
 // create_project — write, requires agentSlug (SEC-21)
-server.registerTool('create_project', { description: 'Create a new project on the Factory board. The calling agent becomes the owner. Slug must be unique, lowercase alphanumeric with hyphens.', inputSchema: createProjectSchema.shape }, async (args, extra) => {
+server.registerTool('create_project', { description: 'Create a new project on the Factory board. The calling agent becomes the owner. Slug must be unique. You can also provide initial portfolio matrix scores.', inputSchema: createProjectSchema.shape }, async (args, extra) => {
   const slug = resolveCallSlug(extra)
   return { content: [{ type: 'text' as const, text: JSON.stringify(await handleCreateProject(args, slug)) }] }
 })
 
 // update_project — write, requires agentSlug (SEC-21)
-server.registerTool('update_project', { description: 'Update an existing project. Only the owning agent may update. Supports changing name, description, status, sprint goal, and sprint cadence.', inputSchema: updateProjectSchema.shape }, async (args, extra) => {
+server.registerTool('update_project', { description: 'Update an existing project. Only the owning agent may update. Supports changing name, description, status, and portfolio matrix scores (business_value, strategic_fit, effort, risk_index).', inputSchema: updateProjectSchema.shape }, async (args, extra) => {
   const slug = resolveCallSlug(extra)
   return { content: [{ type: 'text' as const, text: JSON.stringify(await handleUpdateProject(args, slug)) }] }
 })
 
 // query_projects — read
-server.registerTool('query_projects', { description: 'List projects with optional filters for status, owner agent, or project type. Returns id, slug, name, status, owner, current sprint, and health signals.', inputSchema: queryProjectsSchema.shape }, async (args) => ({
+server.registerTool('query_projects', { description: 'List projects with optional filters for status, owner agent, or project type. Returns id, slug, name, status, owner, current sprint, health signals, and computed roi_score.', inputSchema: queryProjectsSchema.shape }, async (args) => ({
   content: [{ type: 'text' as const, text: JSON.stringify(await handleQueryProjects(args)) }],
 }))
 

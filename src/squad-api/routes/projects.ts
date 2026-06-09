@@ -43,6 +43,11 @@ interface ProjectDbRow {
   description: string | null
   status: string
   owner_agent_slug: string | null
+  business_value: number | null
+  strategic_fit: number | null
+  effort: number | null
+  risk_index: number
+  roi_score?: number
   created_at: string
   updated_at: string
 }
@@ -54,6 +59,11 @@ interface ProjectRow {
   description: string | null
   status: string
   owner_agent_slug: string | null
+  business_value: number | null
+  strategic_fit: number | null
+  effort: number | null
+  risk_index: number
+  roi_score?: number
   created_at: string
   updated_at: string
 }
@@ -128,6 +138,11 @@ router.get('/', async (req, res) => {
              p.description,
              p.status,
              p.owner_agent_slug,
+             p.business_value,
+             p.strategic_fit,
+             p.effort,
+             p.risk_index,
+             (p.business_value * p.strategic_fit)::FLOAT / p.effort AS roi_score,
              p.created_at,
              p.updated_at
         FROM projects p
@@ -151,6 +166,11 @@ router.get('/', async (req, res) => {
       description: row.description,
       status: row.status,
       owner_agent_slug: row.owner_agent_slug,
+      business_value: row.business_value,
+      strategic_fit: row.strategic_fit,
+      effort: row.effort,
+      risk_index: row.risk_index,
+      ...(row.roi_score != null ? { roi_score: row.roi_score } : {}),
       created_at: row.created_at,
       updated_at: row.updated_at,
     }))
@@ -200,6 +220,11 @@ router.get('/:slug', async (req, res) => {
                 p.description,
                 p.status,
                 p.owner_agent_slug,
+                p.business_value,
+                p.strategic_fit,
+                p.effort,
+                p.risk_index,
+                (p.business_value * p.strategic_fit)::FLOAT / p.effort AS roi_score,
                 p.created_at,
                 p.updated_at,
                 COALESCE(
@@ -250,6 +275,11 @@ router.get('/:slug', async (req, res) => {
         description: project.description,
         status: project.status,
         owner_agent_slug: project.owner_agent_slug,
+        business_value: project.business_value,
+        strategic_fit: project.strategic_fit,
+        effort: project.effort,
+        risk_index: project.risk_index,
+        ...(project.roi_score != null ? { roi_score: project.roi_score } : {}),
         open_task_count: parseInt(project.open_task_count, 10),
         current_sprint: sprint != null
           ? {

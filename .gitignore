@@ -22,3 +22,14 @@ packages/dashboard/.env.local
 
 InputOutputLabs-Brandbook-2026.pdf
 IOLabs_Visual_Identity_Brief_v1.md
+
+# Internal operator SOPs — company-specific, not for public consumption.
+# Populated at runtime by scripts/import_official_sops.ts from the private SOPs repo.
+seeds/sops/operator/
+
+# Throwaway migration helper scripts — not production artifacts
+patch_routes.ts
+patch_routes_2.ts
+scripts/import_official_sops.ts
+scripts/import_skills_to_sops.ts
+scripts/run_ingest.ts
