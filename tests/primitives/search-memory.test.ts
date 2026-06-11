@@ -1,5 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { handleSearchMemory, searchMemorySchema } from '../../src/primitives/search-memory.js'
+import { searchMemory } from '../../src/db/queries/memory.js'
+import { hybridRank } from '../../src/search/bm25.js'
+import { embedContent } from '../../src/embeddings/gemini.js'
+import { sanitizeQuery } from '../../src/search/sanitizer.js'
+
+vi.mock('../../src/db/queries/memory.js')
+vi.mock('../../src/search/bm25.js')
+vi.mock('../../src/embeddings/gemini.js')
+vi.mock('../../src/search/sanitizer.js')
 
 // ---------------------------------------------------------------------------
 // Test Suite: Search Memory (Task 1722 — Math.min(60) Cap Removal)
@@ -213,6 +222,43 @@ describe('handleSearchMemory — 60-cap regression tests', () => {
       expect(Number.isSafeInteger(fetchLimit)).toBe(true)
       expect(fetchLimit).toBeGreaterThan(0)
       expect(fetchLimit).toBeLessThanOrEqual(60)
+    })
+  })
+
+  describe('handleSearchMemory functional retrieval tests', () => {
+    beforeEach(() => {
+      vi.mocked(sanitizeQuery).mockReturnValue({
+        clean_query: 'test query',
+        was_sanitized: false,
+        method: 'passthrough',
+        original_length: 10,
+        clean_length: 10,
+      })
+      vi.mocked(embedContent).mockResolvedValue([0.1, 0.2, 0.3])
+    })
+
+    it.each([
+      { limit: 7, expectedFetchLimit: 21 },
+      { limit: 14, expectedFetchLimit: 42 },
+      { limit: 20, expectedFetchLimit: 60 }
+    ])('for limit=$limit, it should request $expectedFetchLimit candidates from DB to guarantee BM25 quality', async ({ limit, expectedFetchLimit }) => {
+      // Arrange: create dummy candidates
+      const dummyCandidates = Array(expectedFetchLimit).fill({ id: 1, content: 'dummy' })
+      vi.mocked(searchMemory).mockResolvedValue(dummyCandidates as any)
+      vi.mocked(hybridRank).mockReturnValue(dummyCandidates as any) // BM25 reranks them
+
+      // Act
+      const result = await handleSearchMemory({ query: 'test query', limit })
+
+      // Assert
+      expect(searchMemory).toHaveBeenCalledWith(expect.objectContaining({
+        limit: expectedFetchLimit
+      }))
+      
+      expect(hybridRank).toHaveBeenCalledWith(dummyCandidates, 'test query')
+      
+      // It should slice the top `limit` results
+      expect(result.results.length).toBe(limit)
     })
   })
 })
