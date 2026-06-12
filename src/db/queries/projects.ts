@@ -240,7 +240,8 @@ export async function applyPortfolioUpdate(params: {
     const result = await pool.query<Project>(
       `SELECT id, slug, name, description, status, owner_agent_slug,
               business_value, strategic_fit, effort, risk_index,
-              (business_value * strategic_fit)::FLOAT / NULLIF(effort, 0) AS roi_score,
+              CASE WHEN effort IS NULL OR effort = 0 THEN NULL
+                   ELSE (business_value * strategic_fit)::FLOAT / effort END AS roi_score,
               created_at, updated_at
        FROM projects
        WHERE id = $1`,
@@ -258,7 +259,8 @@ export async function applyPortfolioUpdate(params: {
      WHERE id = $1
      RETURNING id, slug, name, description, status, owner_agent_slug,
                business_value, strategic_fit, effort, risk_index,
-               (business_value * strategic_fit)::FLOAT / NULLIF(effort, 0) AS roi_score,
+               CASE WHEN effort IS NULL OR effort = 0 THEN NULL
+                    ELSE (business_value * strategic_fit)::FLOAT / effort END AS roi_score,
                created_at, updated_at`,
     values,
   )
