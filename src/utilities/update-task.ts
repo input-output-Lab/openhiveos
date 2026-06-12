@@ -6,7 +6,9 @@ export const updateTaskSchema = z.object({
   task_id: z.number().int().positive(),
   title: z.string().min(1).max(500).optional(),
   description: z.string().max(5000).optional(),
-  status: z.enum(['todo', 'wip', 'review', 'done', 'rework']).optional(),
+  // ARCH-023: `pending-close` is the assignee terminal step. `done` requires
+  // owner approval and is blocked on the assignee path by the M3 gate below.
+  status: z.enum(['todo', 'wip', 'review', 'done', 'rework', 'pending-close']).optional(),
   // unassign=true clears the assignee to NULL. Takes precedence over assignee_agent_slug.
   unassign: z.boolean().optional(),
   // SEC-22: validated against squad.manifest.json — prevents raw PG 23503 FK
@@ -48,6 +50,18 @@ export async function handleUpdateTask(input: UpdateTaskInput, agentSlug: string
     parsed.notes !== undefined
 
   const allowAssigneePath = !ownerOnlyFieldsPresent
+
+  // M3 gate (ARCH-023 — SEC-21 extension): On the assignee path, `done` is not
+  // a valid target status. Assignees submit `pending-close`; only the project
+  // owner may approve the pending-close → done transition. The DB does not
+  // enforce status-value scope on the assignee path independently — this gate
+  // is the only enforcement layer. Changes here are Tier 3 / require Locksmith review.
+  if (allowAssigneePath && parsed.status === 'done') {
+    return {
+      error: 'not_found_or_unauthorized',
+      message: 'Task not found or you are not authorized to update it.',
+    }
+  }
 
   const result = await updateTask({
     task_id: parsed.task_id,

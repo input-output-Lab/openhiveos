@@ -82,7 +82,7 @@ export interface DispositionProfile {
 
 export type ProjectStatus = 'active' | 'archived'
 
-export type TaskStatus = 'todo' | 'wip' | 'review' | 'done' | 'rework'
+export type TaskStatus = 'todo' | 'wip' | 'review' | 'done' | 'rework' | 'pending-close'
 
 export interface Project {
   id: number

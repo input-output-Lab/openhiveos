@@ -115,6 +115,12 @@ export async function updateTask(params: {
       params.assignee_agent_slug ?? null,
       params.github_pr_url ?? null,
       params.notes ?? null,
+      // M1 (ARCH-023 / SEC-21): The DB WHERE clause does NOT gate status values
+      // on the assignee path — it only gates which rows the assignee may touch.
+      // An assignee who reaches this point can write any valid status. The
+      // handler is the sole enforcement layer for status-value scope on the
+      // assignee path. Any change to allowAssigneePath computation in the handler
+      // is a Tier 3 security change and requires Locksmith review at PR-open.
       params.allowAssigneePath ?? false,
     ],
   )

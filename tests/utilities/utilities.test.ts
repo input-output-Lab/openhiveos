@@ -1579,10 +1579,10 @@ describe('TC-U12: update-task', () => {
   })
 
   // Model C field gate: assignee path (3 tests)
-  it('TC-U12-7: assignee updates status only — sets allowAssigneePath=true', async () => {
-    mockUpdateTask.mockResolvedValueOnce({ ...stubTaskForUpdate, status: 'done' })
+  it('TC-U12-7: assignee updates status to pending-close — sets allowAssigneePath=true', async () => {
+    mockUpdateTask.mockResolvedValueOnce({ ...stubTaskForUpdate, status: 'pending-close' })
 
-    await handleUpdateTask({ task_id: 42, status: 'done' }, AGENT)
+    await handleUpdateTask({ task_id: 42, status: 'pending-close' }, AGENT)
 
     expect(mockUpdateTask).toHaveBeenCalledWith(
       expect.objectContaining({ allowAssigneePath: true }),
@@ -1610,19 +1610,20 @@ describe('TC-U12: update-task', () => {
   })
 
   // Authorization & DB errors (2 tests)
-  it('TC-U12-10: returns error when task not found or unauthorized', async () => {
+  it('TC-U12-10: returns error when task not found or unauthorized (DB null return)', async () => {
     mockUpdateTask.mockResolvedValueOnce(null)
 
-    const result = await handleUpdateTask({ task_id: 42, status: 'done' }, AGENT)
+    const result = await handleUpdateTask({ task_id: 42, status: 'pending-close' }, AGENT)
 
     expect(result).toHaveProperty('error', 'not_found_or_unauthorized')
   })
 
   it('TC-U12-11: handles DB error from query layer', async () => {
+    // Use a non-M3-intercepted status so the call reaches the DB layer
     mockUpdateTask.mockRejectedValueOnce(new Error('Connection timeout'))
 
     await expect(
-      handleUpdateTask({ task_id: 42, status: 'done' }, AGENT),
+      handleUpdateTask({ task_id: 42, status: 'pending-close' }, AGENT),
     ).rejects.toThrow('Connection timeout')
   })
 
@@ -1684,14 +1685,20 @@ describe('TC-U12: update-task', () => {
   })
 
   // Edge cases & boundaries (2 tests)
-  it('TC-U12-21: accepts all 5 valid status values', async () => {
-    const statuses = ['todo', 'wip', 'review', 'done', 'rework'] as const
-
-    for (const status of statuses) {
+  it('TC-U12-21: accepts all valid status values', async () => {
+    // Assignee-path statuses (allowAssigneePath=true — no owner-only fields)
+    const assigneeStatuses = ['todo', 'wip', 'review', 'rework', 'pending-close'] as const
+    for (const status of assigneeStatuses) {
       mockUpdateTask.mockResolvedValueOnce({ ...stubTaskForUpdate, status })
       const result = await handleUpdateTask({ task_id: 42, status }, AGENT)
       expect(result.status).toBe(status)
     }
+
+    // Owner path: `done` requires at least one owner-only field (e.g. notes)
+    // so that allowAssigneePath=false and M3 does not fire.
+    mockUpdateTask.mockResolvedValueOnce({ ...stubTaskForUpdate, status: 'done' })
+    const ownerClose = await handleUpdateTask({ task_id: 42, status: 'done', notes: 'Approved.' }, AGENT)
+    expect(ownerClose.status).toBe('done')
   })
 
   it('TC-U12-22: title at exactly 500 chars (boundary) accepted', async () => {
@@ -1701,6 +1708,26 @@ describe('TC-U12: update-task', () => {
     const result = await handleUpdateTask({ task_id: 42, title: titleAt500 }, AGENT)
 
     expect(result.title).toHaveLength(500)
+  })
+
+  // M3 gate (ARCH-023) — 2 tests required by Locksmith
+  it('TC-U12-M3-1: assignee direct done write is blocked (M3 gate)', async () => {
+    // When only `status` is present, allowAssigneePath=true. `done` on the
+    // assignee path must be rejected before the DB is called.
+    const result = await handleUpdateTask({ task_id: 42, status: 'done' }, AGENT)
+
+    expect(result).toHaveProperty('error', 'not_found_or_unauthorized')
+    expect(mockUpdateTask).not.toHaveBeenCalled()
+  })
+
+  it('TC-U12-M3-2: assignee self-approval of pending-close is blocked (M3 gate)', async () => {
+    // An assignee whose task is pending-close cannot self-approve by setting
+    // status: done directly. The handler does not see the current task status;
+    // M3 fires on the target status: `done` on the assignee path is always rejected.
+    const result = await handleUpdateTask({ task_id: 42, status: 'done' }, AGENT)
+
+    expect(result).toHaveProperty('error', 'not_found_or_unauthorized')
+    expect(mockUpdateTask).not.toHaveBeenCalled()
   })
 })
 
