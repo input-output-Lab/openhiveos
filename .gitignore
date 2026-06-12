@@ -37,3 +37,8 @@ scripts/run_ingest.ts
 # Runtime artifacts
 logs/
 backups/
+
+# Sprint artefact docs
+S*.md
+TASK-*.md
+patch_*.js
