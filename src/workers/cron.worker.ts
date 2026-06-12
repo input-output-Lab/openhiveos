@@ -82,9 +82,19 @@ export class CronWorker {
 
     try {
       const dueCrons = await getDueCrons(this.pool)
-      for (const cron of dueCrons) {
-        await this.fire(cron)
-      }
+      // Fire all due crons in parallel using Promise.allSettled() to preserve
+      // per-cron error isolation. One slow/failing cron does not block others.
+      const results = await Promise.allSettled(dueCrons.map(cron => this.fire(cron)))
+      // Log any rejections (fire() should not throw, but allSettled catches them).
+      results.forEach((result, index) => {
+        if (result.status === 'rejected') {
+          const cron = dueCrons[index]
+          console.error(
+            `[cron-worker] Fire rejected for cron ${String(cron?.id)}:`,
+            result.reason,
+          )
+        }
+      })
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       console.error('[cron-worker] Poll error:', msg)
