@@ -218,7 +218,7 @@ server.registerTool('query_sprints', { description: 'List sprint history for a p
 
 // query_crons — read, open with filter whitelist (SEC-30)
 // Cross-agent enumeration gap documented in ARCH-011 Tech Debt #2 (deferred post-v0.1)
-server.registerTool('query_crons', { description: 'List scheduled cron definitions. Filter by project, assigned agent, or status (active, paused, deleted). Returns schedule, tool name, payload, and last run time.', inputSchema: queryCronsSchema.shape }, async (args) => ({
+server.registerTool('query_crons', { description: 'List scheduled cron definitions. Filter by project, assigned agent, or status (active, paused, deleted). Returns schedule, tool name, payload, and last_run_at (UTC timestamp or null).', inputSchema: queryCronsSchema.shape }, async (args) => ({
   content: [{ type: 'text' as const, text: JSON.stringify(await handleQueryCrons(args)) }],
 }))
 
