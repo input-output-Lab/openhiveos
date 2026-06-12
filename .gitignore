@@ -38,7 +38,7 @@ scripts/run_ingest.ts
 logs/
 backups/
 
-# Sprint artefact docs
-S*.md
-TASK-*.md
-patch_*.js
+# Sprint artefact docs (root-level only — scoped to avoid catching seeds/sops files)
+/S*.md
+/TASK-*.md
+/patch_*.js

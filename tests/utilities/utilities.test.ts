@@ -1721,9 +1721,12 @@ describe('TC-U12: update-task', () => {
   })
 
   it('TC-U12-M3-2: assignee self-approval of pending-close is blocked (M3 gate)', async () => {
-    // An assignee whose task is pending-close cannot self-approve by setting
-    // status: done directly. The handler does not see the current task status;
-    // M3 fires on the target status: `done` on the assignee path is always rejected.
+    // Self-approval: an agent whose task is in pending-close cannot advance it to
+    // done by calling update_task themselves. The handler has no access to the
+    // current task status — M3 fires unconditionally on `done` + assignee path.
+    // This test intentionally shares the same code path as TC-U12-M3-1 (that is
+    // the correct behaviour — there is no distinct implementation path to exercise).
+    // Positive coverage (pending-close IS allowed on assignee path) lives in TC-U12-7.
     const result = await handleUpdateTask({ task_id: 42, status: 'done' }, AGENT)
 
     expect(result).toHaveProperty('error', 'not_found_or_unauthorized')
