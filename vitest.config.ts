@@ -11,6 +11,8 @@ export default defineConfig({
     // satisfies the guard without connecting to any real database.
     env: {
       DATABASE_URL: 'postgresql://test:test@localhost:5432/test_placeholder',
+      GEMINI_API_KEY: 'test_placeholder_key',
+      GATEWAY_MODE: 'true',
       // testcontainers needs DOCKER_HOST to locate the OrbStack socket on macOS
       DOCKER_HOST: 'unix:///var/run/docker.sock',
     },

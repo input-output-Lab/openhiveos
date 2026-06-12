@@ -46,6 +46,7 @@ vi.mock('../../src/db/queries/projects.js', () => ({
   updateProject: vi.fn(),
   queryProjects: vi.fn(),
   getProjectBoard: vi.fn(),
+  applyPortfolioUpdate: vi.fn(),
   ALLOWED_PROJECT_FILTERS: ['status', 'owner_agent_slug'],
 }))
 
@@ -91,7 +92,7 @@ import { handleQueryProjects } from '../../src/utilities/query-projects.js'
 import { handleQuerySprints } from '../../src/utilities/query-sprints.js'
 import { handleQueryTasks } from '../../src/utilities/query-tasks.js'
 import { handleUpdateCron, validatePayload } from '../../src/utilities/update-cron.js'
-import { handleUpdateProject } from '../../src/utilities/update-project.js'
+import { handleUpdateProject, updateProjectSchema } from '../../src/utilities/update-project.js'
 import { handleUpdateTask } from '../../src/utilities/update-task.js'
 
 import * as tasksDb from '../../src/db/queries/tasks.js'
@@ -116,6 +117,7 @@ const mockCreateProject = vi.mocked(projectsDb.createProject)
 const mockUpdateProject = vi.mocked(projectsDb.updateProject)
 const mockQueryProjects = vi.mocked(projectsDb.queryProjects)
 const mockGetProjectBoard = vi.mocked(projectsDb.getProjectBoard)
+const mockApplyPortfolioUpdate = vi.mocked(projectsDb.applyPortfolioUpdate)
 
 const mockQuerySprints = vi.mocked(sprintsDb.querySprints)
 const mockIsValidAgentSlug = vi.mocked(isValidAgentSlug)
@@ -1305,67 +1307,133 @@ describe('TC-U9: query-tasks', () => {
 })
 
 // ---------------------------------------------------------------------------
-// TC-U11: update-project (10 tests)
+// TC-U11: update-project portfolio matrix (S11-BE-03)
 // ---------------------------------------------------------------------------
+// S11-BE-03: Portfolio matrix updates only. No ownership restriction.
+// Tool-assignment is the access gate. Returns updated project with roi_score.
 
 describe('TC-U11: update-project', () => {
+  const stubProjectWithRoi = {
+    ...stubProject,
+    roi_score: undefined as number | undefined,
+  }
+
   beforeEach(() => { vi.clearAllMocks() })
 
-  it('TC-U11-1: updates name only', async () => {
-    mockUpdateProject.mockResolvedValueOnce({ ...stubProject, name: 'New Name' })
-    const result = await handleUpdateProject({ project_id: 5, name: 'New Name' }, AGENT)
-    expect(result.name).toBe('New Name')
+  it('TC-U11-1: updates business_value only', async () => {
+    mockApplyPortfolioUpdate.mockResolvedValueOnce({
+      ...stubProjectWithRoi,
+      business_value: 3,
+      roi_score: undefined,
+    })
+    const result = await handleUpdateProject({ project_id: 5, business_value: 3 })
+    expect(result).toHaveProperty('kind', 'success')
+    if (result.kind === 'success') {
+      expect(result.project.business_value).toBe(3)
+    }
   })
 
-  it('TC-U11-2: updates description only', async () => {
-    mockUpdateProject.mockResolvedValueOnce({ ...stubProject, description: 'New desc' })
-    const result = await handleUpdateProject({ project_id: 5, description: 'New desc' }, AGENT)
-    expect(result.description).toBe('New desc')
+  it('TC-U11-2: updates strategic_fit and effort (multiple fields)', async () => {
+    mockApplyPortfolioUpdate.mockResolvedValueOnce({
+      ...stubProjectWithRoi,
+      strategic_fit: 1,
+      effort: 5,
+      roi_score: undefined,
+    })
+    const result = await handleUpdateProject({
+      project_id: 5,
+      strategic_fit: 1,
+      effort: 5,
+    })
+    expect(result).toHaveProperty('kind', 'success')
+    if (result.kind === 'success') {
+      expect(result.project.strategic_fit).toBe(1)
+      expect(result.project.effort).toBe(5)
+    }
   })
 
-  it('TC-U11-3: transitions status to archived', async () => {
-    mockUpdateProject.mockResolvedValueOnce({ ...stubProject, status: 'archived' })
-    const result = await handleUpdateProject({ project_id: 5, status: 'archived' }, AGENT)
-    expect(result.status).toBe('archived')
+  it('TC-U11-3: sets field to null (nullifies score)', async () => {
+    mockApplyPortfolioUpdate.mockResolvedValueOnce({
+      ...stubProjectWithRoi,
+      business_value: null,
+      roi_score: null,
+    })
+    const result = await handleUpdateProject({
+      project_id: 5,
+      business_value: null,
+    })
+    expect(result).toHaveProperty('kind', 'success')
+    if (result.kind === 'success') {
+      expect(result.project.business_value).toBeNull()
+      expect(result.roi_score).toBeNull()
+    }
   })
 
-  it('TC-U11-4: transitions status back to active', async () => {
-    const archived = { ...stubProject, status: 'archived' as const }
-    mockUpdateProject.mockResolvedValueOnce({ ...archived, status: 'active' })
-    const result = await handleUpdateProject({ project_id: 5, status: 'active' }, AGENT)
-    expect(result.status).toBe('active')
+  it('TC-U11-4: computes roi_score: (bv × sf) / effort', async () => {
+    mockApplyPortfolioUpdate.mockResolvedValueOnce({
+      ...stubProjectWithRoi,
+      business_value: 5,
+      strategic_fit: 3,
+      effort: 1,
+      roi_score: 15, // (5 * 3) / 1
+    })
+    const result = await handleUpdateProject({
+      project_id: 5,
+      business_value: 5,
+      strategic_fit: 3,
+      effort: 1,
+    })
+    expect(result).toHaveProperty('kind', 'success')
+    if (result.kind === 'success') {
+      expect(result.roi_score).toBe(15)
+    }
   })
 
-  it('TC-U11-5: returns error when project not found or not owned', async () => {
-    mockUpdateProject.mockResolvedValueOnce(null)
-    const result = await handleUpdateProject({ project_id: 5, name: 'Hack' }, AGENT)
-    expect(result).toHaveProperty('error', 'not_found_or_unauthorized')
+  it('TC-U11-5: returns not_found when project does not exist', async () => {
+    mockApplyPortfolioUpdate.mockRejectedValueOnce(new Error('not found'))
+    const result = await handleUpdateProject({
+      project_id: 999999,
+      business_value: 3,
+    })
+    expect(result).toHaveProperty('kind', 'not_found')
   })
 
-  it('TC-U11-6: passes owner_agent_slug to DB layer', async () => {
-    mockUpdateProject.mockResolvedValueOnce({ ...stubProject })
-    await handleUpdateProject({ project_id: 5, name: 'Check' }, AGENT)
-    expect(mockUpdateProject).toHaveBeenCalledWith(
-      expect.objectContaining({ owner_agent_slug: AGENT }),
-    )
+  it('TC-U11-6: NO ownership check (any agent may update any project)', async () => {
+    // handler() does not accept agentSlug — no ownership restriction
+    // (in old contract, this test checked agentSlug was passed; new contract has no agentSlug param)
+    mockApplyPortfolioUpdate.mockResolvedValueOnce({
+      ...stubProjectWithRoi,
+      business_value: 1,
+    })
+    const result = await handleUpdateProject({
+      project_id: 5,
+      business_value: 1,
+    })
+    expect(result).toBeDefined()
   })
 
   it('TC-U11-7: rejects project_id ≤ 0 at schema level', async () => {
-    await expect(handleUpdateProject({ project_id: 0 }, AGENT)).rejects.toThrow()
+    expect(() =>
+      updateProjectSchema.parse({ project_id: 0, business_value: 3 })
+    ).toThrow()
   })
 
-  it('TC-U11-8: rejects name > 200 chars at schema level', async () => {
-    await expect(handleUpdateProject({ project_id: 5, name: 'x'.repeat(201) }, AGENT)).rejects.toThrow()
+  it('TC-U11-8: rejects business_value not in [1,3,5] at schema level', async () => {
+    expect(() =>
+      updateProjectSchema.parse({ project_id: 5, business_value: 2 })
+    ).toThrow()
   })
 
-  it('TC-U11-9: rejects description > 2000 chars at schema level', async () => {
+  it('TC-U11-9: rejects effort = 4 (not in [1,3,5]) at schema level', async () => {
+    expect(() =>
+      updateProjectSchema.parse({ project_id: 5, effort: 4 })
+    ).toThrow()
+  })
+
+  it('TC-U11-10: throws when no fields provided (handler validation)', async () => {
     await expect(
-      handleUpdateProject({ project_id: 5, description: 'x'.repeat(2001) }, AGENT),
-    ).rejects.toThrow()
-  })
-
-  it('TC-U11-10: rejects status deleted (not in enum) at schema level', async () => {
-    await expect(handleUpdateProject({ project_id: 5, status: 'deleted' as any }, AGENT)).rejects.toThrow()
+      handleUpdateProject({ project_id: 5 })
+    ).rejects.toThrow(/At least one portfolio matrix field must be provided/)
   })
 })
 

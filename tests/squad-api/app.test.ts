@@ -861,3 +861,215 @@ describe('GET /api/tasks/:id', () => {
     expect(zeroId.status).toBe(400)
   })
 })
+
+// =============================================================================
+describe('PATCH /api/projects/:slug — Portfolio matrix update (S11-BE-00)', () => {
+  it('TC-SA32: returns 200 with updated project when portfolio fields provided', async () => {
+    // Create a test project
+    const projectRes = await db.pool.query<{ id: number }>(
+      `INSERT INTO projects (slug, name, owner_agent_slug, status)
+       VALUES ('patch-test-project-1', 'Patch Test Project 1', 'squad-test-agent', 'active')
+       ON CONFLICT (slug) DO NOTHING
+       RETURNING id`,
+    )
+    const projectId: number = projectRes.rows[0]?.id
+      ?? (await db.pool.query<{ id: number }>(
+            `SELECT id FROM projects WHERE slug = 'patch-test-project-1'`,
+          )).rows[0]!.id
+
+    const app = createSquadApiApp()
+    const res = await request(app)
+      .patch('/api/projects/patch-test-project-1')
+      .set('Authorization', `Bearer ${VALID_TOKEN}`)
+      .send({
+        business_value: 5,
+        strategic_fit: 3,
+        effort: 1,
+      })
+
+    expect(res.status).toBe(200)
+    const body = res.body as { data: Record<string, unknown> }
+    expect(body.data).toBeDefined()
+    expect(body.data['business_value']).toBe(5)
+    expect(body.data['strategic_fit']).toBe(3)
+    expect(body.data['effort']).toBe(1)
+    // ROI score: (5 * 3) / 1 = 15
+    expect(body.data['roi_score']).toBe(15)
+  })
+
+  it('TC-SA33: returns 200 and computes null ROI score when any component is null', async () => {
+    const projectRes = await db.pool.query<{ id: number }>(
+      `INSERT INTO projects (slug, name, owner_agent_slug, status)
+       VALUES ('patch-test-project-2', 'Patch Test Project 2', 'squad-test-agent', 'active')
+       ON CONFLICT (slug) DO NOTHING
+       RETURNING id`,
+    )
+    const projectId: number = projectRes.rows[0]?.id
+      ?? (await db.pool.query<{ id: number }>(
+            `SELECT id FROM projects WHERE slug = 'patch-test-project-2'`,
+          )).rows[0]!.id
+
+    const app = createSquadApiApp()
+    const res = await request(app)
+      .patch('/api/projects/patch-test-project-2')
+      .set('Authorization', `Bearer ${VALID_TOKEN}`)
+      .send({
+        business_value: null,
+        strategic_fit: 3,
+        effort: 1,
+      })
+
+    expect(res.status).toBe(200)
+    const body = res.body as { data: Record<string, unknown> }
+    expect(body.data['business_value']).toBeNull()
+    expect(body.data['strategic_fit']).toBe(3)
+    // ROI score should be null because business_value is null
+    expect(body.data['roi_score']).toBeNull()
+  })
+
+  it('TC-SA34: returns 400 when field value not in [1,3,5]', async () => {
+    const app = createSquadApiApp()
+    const res = await request(app)
+      .patch('/api/projects/patch-test-project-1')
+      .set('Authorization', `Bearer ${VALID_TOKEN}`)
+      .send({
+        business_value: 2, // Invalid — not in [1,3,5]
+      })
+
+    expect(res.status).toBe(400)
+    expect(res.body.error).toBe('Validation failed')
+  })
+
+  it('TC-SA35: returns 422 when no fields provided', async () => {
+    const app = createSquadApiApp()
+    const res = await request(app)
+      .patch('/api/projects/patch-test-project-1')
+      .set('Authorization', `Bearer ${VALID_TOKEN}`)
+      .send({})
+
+    expect(res.status).toBe(422)
+    expect(res.body.error).toMatch(/At least one portfolio matrix field must be provided/)
+  })
+
+  it('TC-SA36: returns 404 when project slug not found (opaque)', async () => {
+    const app = createSquadApiApp()
+    const res = await request(app)
+      .patch('/api/projects/nonexistent-patch-project-xyz')
+      .set('Authorization', `Bearer ${VALID_TOKEN}`)
+      .send({
+        business_value: 3,
+      })
+
+    expect(res.status).toBe(404)
+    expect(res.body.error).toBe('Project not found')
+    // Should not enumerate valid projects (SEC-A6)
+    expect(JSON.stringify(res.body)).not.toMatch(/patch-test-project/)
+  })
+
+  it('TC-SA37: only allows portfolio matrix fields (allowlist enforced via .strict())', async () => {
+    const app = createSquadApiApp()
+    const res = await request(app)
+      .patch('/api/projects/patch-test-project-1')
+      .set('Authorization', `Bearer ${VALID_TOKEN}`)
+      .send({
+        business_value: 3,
+        name: 'New Name', // Not in allowlist — .strict() rejects
+      })
+
+    // SEC-31: Zod .strict() rejects unknown fields with 400
+    expect(res.status).toBe(400)
+    expect(res.body.error).toBe('Validation failed')
+  })
+
+  it('TC-SA38: partial update — only business_value, other fields unchanged', async () => {
+    // Create project with all fields set
+    const projectRes = await db.pool.query<{ id: number }>(
+      `INSERT INTO projects (slug, name, owner_agent_slug, status, business_value, strategic_fit, effort, risk_index)
+       VALUES ('patch-test-project-3', 'Patch Test Project 3', 'squad-test-agent', 'active', 1, 3, 5, 1)
+       ON CONFLICT (slug) DO NOTHING
+       RETURNING id`,
+    )
+    const projectId: number = projectRes.rows[0]?.id
+      ?? (await db.pool.query<{ id: number }>(
+            `SELECT id FROM projects WHERE slug = 'patch-test-project-3'`,
+          )).rows[0]!.id
+
+    const app = createSquadApiApp()
+    const res = await request(app)
+      .patch('/api/projects/patch-test-project-3')
+      .set('Authorization', `Bearer ${VALID_TOKEN}`)
+      .send({
+        business_value: 5, // Change only business_value
+      })
+
+    expect(res.status).toBe(200)
+    const body = res.body as { data: Record<string, unknown> }
+    expect(body.data['business_value']).toBe(5)
+    expect(body.data['strategic_fit']).toBe(3) // Unchanged
+    expect(body.data['effort']).toBe(5) // Unchanged
+    expect(body.data['risk_index']).toBe(1) // Unchanged
+    // ROI: (5 * 3) / 5 = 3
+    expect(body.data['roi_score']).toBe(3)
+  })
+
+  it('TC-SA39: setting effort when BV/SF are null — ROI stays null', async () => {
+    // Create project with null business_value
+    const projectRes = await db.pool.query<{ id: number }>(
+      `INSERT INTO projects (slug, name, owner_agent_slug, status, strategic_fit, risk_index)
+       VALUES ('patch-test-project-4', 'Patch Test Project 4', 'squad-test-agent', 'active', 3, 1)
+       ON CONFLICT (slug) DO NOTHING
+       RETURNING id`,
+    )
+    const projectId: number = projectRes.rows[0]?.id
+      ?? (await db.pool.query<{ id: number }>(
+            `SELECT id FROM projects WHERE slug = 'patch-test-project-4'`,
+          )).rows[0]!.id
+
+    const app = createSquadApiApp()
+    const res = await request(app)
+      .patch('/api/projects/patch-test-project-4')
+      .set('Authorization', `Bearer ${VALID_TOKEN}`)
+      .send({
+        effort: 1, // Set effort, but business_value is still null
+      })
+
+    expect(res.status).toBe(200)
+    const body = res.body as { data: Record<string, unknown> }
+    expect(body.data['business_value']).toBeNull()
+    expect(body.data['strategic_fit']).toBe(3)
+    expect(body.data['effort']).toBe(1)
+    // ROI: null (because business_value is null)
+    expect(body.data['roi_score']).toBeNull()
+  })
+
+  it('TC-SA40: updated_at timestamp changes on PATCH', async () => {
+    // Create project
+    const projectRes = await db.pool.query<{ id: number; updated_at: string }>(
+      `INSERT INTO projects (slug, name, owner_agent_slug, status, business_value, strategic_fit, effort, risk_index)
+       VALUES ('patch-test-project-5', 'Patch Test Project 5', 'squad-test-agent', 'active', 1, 1, 1, 1)
+       ON CONFLICT (slug) DO NOTHING
+       RETURNING id, updated_at`,
+    )
+    const projectId: number = projectRes.rows[0]!.id
+    const originalUpdatedAt = new Date(projectRes.rows[0]!.updated_at).getTime()
+
+    // Sleep briefly to ensure timestamp difference
+    await new Promise((resolve) => setTimeout(resolve, 100))
+
+    const app = createSquadApiApp()
+    const res = await request(app)
+      .patch('/api/projects/patch-test-project-5')
+      .set('Authorization', `Bearer ${VALID_TOKEN}`)
+      .send({
+        business_value: 5,
+      })
+
+    expect(res.status).toBe(200)
+    const body = res.body as { data: Record<string, unknown> }
+    const newUpdatedAt = new Date(body.data['updated_at'] as string).getTime()
+
+    // Verify updated_at has changed
+    expect(newUpdatedAt).toBeGreaterThan(originalUpdatedAt)
+  })
+})
+

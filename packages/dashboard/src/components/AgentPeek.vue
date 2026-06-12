@@ -26,14 +26,14 @@
 
     <!-- Loading -->
     <div v-if="loading" class="flex flex-col gap-3 p-6" aria-busy="true" aria-label="Loading agent details">
-      <div class="h-4 bg-gray-100 rounded animate-pulse w-2/3" />
-      <div class="h-4 bg-gray-100 rounded animate-pulse w-1/2" />
-      <div class="h-4 bg-gray-100 rounded animate-pulse w-3/4" />
+      <div class="h-4 rounded animate-pulse w-2/3" style="background-color: color-mix(in srgb, var(--io-surface-border) 25%, transparent);" />
+      <div class="h-4 rounded animate-pulse w-1/2" style="background-color: color-mix(in srgb, var(--io-surface-border) 20%, transparent);" />
+      <div class="h-4 rounded animate-pulse w-3/4" style="background-color: color-mix(in srgb, var(--io-surface-border) 15%, transparent);" />
     </div>
 
     <!-- Error -->
     <div v-else-if="error" class="p-6">
-      <div class="bg-red-50 border border-red-100 rounded-xl p-4 text-sm text-red-600">
+      <div class="p-4 text-sm" style="background-color: var(--io-error-bg); border: 1px solid var(--io-error-border); border-radius: var(--io-radius-xl); color: color-mix(in srgb, var(--io-error) 80%, var(--io-dark));">
         {{ error }}
       </div>
     </div>
@@ -42,29 +42,29 @@
     <div v-else-if="agentData" class="p-6 space-y-6">
       <!-- Identity row -->
       <div class="flex items-start gap-4">
-        <div class="w-10 h-10 rounded-full bg-[#71F79F]/15 flex items-center justify-center flex-shrink-0 text-lg" aria-hidden="true">◉</div>
+        <div class="w-10 h-10 flex items-center justify-center flex-shrink-0 text-lg" style="border-radius: var(--io-radius-full); background-color: var(--io-success-bg);" aria-hidden="true">◉</div>
         <div class="min-w-0">
-          <h3 class="text-[15px] font-semibold text-[#14201E] truncate">{{ agentData.agent.display_name }}</h3>
-          <p class="text-xs text-[#14201E]/40 font-mono mt-0.5">{{ agentData.agent.slug }}</p>
-          <p v-if="agentData.agent.manifest?.role" class="text-xs text-[#14201E]/60 mt-1">{{ agentData.agent.manifest.role }}</p>
+          <h3 class="text-sm font-semibold truncate" style="font-family: var(--io-font-body); color: var(--io-dark);">{{ agentData.agent.display_name }}</h3>
+          <p class="text-xs font-mono mt-0.5 ds-text-muted">{{ agentData.agent.slug }}</p>
+          <p v-if="agentData.agent.manifest?.role" class="text-xs ds-text-muted mt-1">{{ agentData.agent.manifest.role }}</p>
         </div>
       </div>
 
       <!-- Stats grid -->
       <div class="grid grid-cols-2 gap-3">
-        <div class="bg-gray-50 rounded-lg p-3">
-          <p class="text-[10px] font-semibold uppercase tracking-widest text-[#14201E]/30 mb-1">Active Tasks</p>
-          <p class="text-2xl font-bold text-[#14201E]">{{ agentData.agent.active_task_count }}</p>
+        <div class="p-3" style="background-color: color-mix(in srgb, var(--io-dark) 4%, transparent); border-radius: var(--io-radius-lg);">
+          <p class="ds-th" style="padding:0; margin-bottom: var(--io-space-1);">Active Tasks</p>
+          <p class="ds-stat-value">{{ agentData.agent.active_task_count }}</p>
         </div>
-        <div class="bg-gray-50 rounded-lg p-3">
-          <p class="text-[10px] font-semibold uppercase tracking-widest text-[#14201E]/30 mb-1">Last Seen</p>
-          <p class="text-sm font-medium text-[#14201E]/70">{{ lastSeen }}</p>
+        <div class="p-3" style="background-color: color-mix(in srgb, var(--io-dark) 4%, transparent); border-radius: var(--io-radius-lg);">
+          <p class="ds-th" style="padding:0; margin-bottom: var(--io-space-1);">Last Seen</p>
+          <p class="text-sm font-medium ds-text-muted">{{ lastSeen }}</p>
         </div>
       </div>
 
       <!-- Manifest — skills -->
       <div v-if="agentData.agent.manifest?.skills?.length" class="space-y-2">
-        <p class="text-[10px] font-semibold uppercase tracking-widest text-[#14201E]/30">Skills</p>
+        <p class="ds-th" style="padding:0;">Skills</p>
         <div class="flex flex-wrap gap-1.5">
           <DataBadge
             v-for="skill in agentData.agent.manifest.skills"
@@ -78,7 +78,7 @@
 
       <!-- Manifest — owns -->
       <div v-if="agentData.agent.manifest?.owns?.length" class="space-y-2">
-        <p class="text-[10px] font-semibold uppercase tracking-widest text-[#14201E]/30">Owns</p>
+        <p class="ds-th" style="padding:0;">Owns</p>
         <div class="flex flex-wrap gap-1.5">
           <DataBadge
             v-for="item in agentData.agent.manifest.owns"
@@ -92,7 +92,7 @@
 
       <!-- Manifest — works with -->
       <div v-if="agentData.agent.manifest?.works_with?.length" class="space-y-2">
-        <p class="text-[10px] font-semibold uppercase tracking-widest text-[#14201E]/30">Works With</p>
+        <p class="ds-th" style="padding:0;">Works With</p>
         <div class="flex flex-wrap gap-1.5">
           <DataBadge
             v-for="peer in agentData.agent.manifest.works_with"
@@ -105,16 +105,19 @@
       </div>
 
       <!-- Timestamps -->
-      <div class="border-t border-gray-100 pt-4 space-y-2">
+      <div class="pt-4 space-y-2" style="border-top: 1px solid color-mix(in srgb, var(--io-surface-border) 35%, transparent);">
         <div class="flex justify-between text-xs">
-          <span class="text-[#14201E]/30 font-medium">Token rotated</span>
-          <span class="text-[#14201E]/60">{{ formatDate(agentData.agent.updated_at) }}</span>
+          <span class="ds-text-faint font-medium">Token rotated</span>
+          <span class="ds-text-muted">{{ formatDate(agentData.agent.updated_at) }}</span>
         </div>
         <div v-if="agentData.agent.last_used_at" class="flex justify-between text-xs">
-          <span class="text-[#14201E]/30 font-medium">Last auth</span>
-          <span class="text-[#14201E]/60">{{ formatDate(agentData.agent.last_used_at) }}</span>
+          <span class="ds-text-faint font-medium">Last auth</span>
+          <span class="ds-text-muted">{{ formatDate(agentData.agent.last_used_at) }}</span>
         </div>
       </div>
+
+      <!-- Reasoning Ledger -->
+      <ReasoningLedger :agent-slug="agentData.agent.slug" />
     </div>
   </AppDrawer>
 </template>
@@ -123,6 +126,7 @@
 import { computed, watch } from 'vue'
 import AppDrawer from './AppDrawer.vue'
 import DataBadge from './DataBadge.vue'
+import ReasoningLedger from './ReasoningLedger.vue'
 import { useApi } from '../composables/useApi'
 import { getAgentBySlug } from '../services/squadApi'
 import type { AgentDetail } from '../types/api'

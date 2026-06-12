@@ -1,5 +1,6 @@
 import { Router } from 'express'
-import { withReaderRole } from '../db.js'
+import { z } from 'zod'
+import { withReaderRole, squadApiPool } from '../db.js'
 
 // ---------------------------------------------------------------------------
 // /api/projects — project roster (ARCH-019 Sprint 10, S10-BE-01/02/03)
@@ -47,7 +48,7 @@ interface ProjectDbRow {
   strategic_fit: number | null
   effort: number | null
   risk_index: number
-  roi_score?: number
+  roi_score: number | null
   created_at: string
   updated_at: string
 }
@@ -63,7 +64,7 @@ interface ProjectRow {
   strategic_fit: number | null
   effort: number | null
   risk_index: number
-  roi_score?: number
+  roi_score: number | null
   created_at: string
   updated_at: string
 }
@@ -142,7 +143,7 @@ router.get('/', async (req, res) => {
              p.strategic_fit,
              p.effort,
              p.risk_index,
-             (p.business_value * p.strategic_fit)::FLOAT / p.effort AS roi_score,
+             CASE WHEN p.effort IS NULL OR p.effort = 0 THEN NULL ELSE (p.business_value * p.strategic_fit)::FLOAT / p.effort END AS roi_score,
              p.created_at,
              p.updated_at
         FROM projects p
@@ -170,7 +171,7 @@ router.get('/', async (req, res) => {
       strategic_fit: row.strategic_fit,
       effort: row.effort,
       risk_index: row.risk_index,
-      ...(row.roi_score != null ? { roi_score: row.roi_score } : {}),
+      roi_score: row.roi_score ?? null,
       created_at: row.created_at,
       updated_at: row.updated_at,
     }))
@@ -224,7 +225,7 @@ router.get('/:slug', async (req, res) => {
                 p.strategic_fit,
                 p.effort,
                 p.risk_index,
-                (p.business_value * p.strategic_fit)::FLOAT / p.effort AS roi_score,
+                CASE WHEN p.effort IS NULL OR p.effort = 0 THEN NULL ELSE (p.business_value * p.strategic_fit)::FLOAT / p.effort END AS roi_score,
                 p.created_at,
                 p.updated_at,
                 COALESCE(
@@ -279,7 +280,7 @@ router.get('/:slug', async (req, res) => {
         strategic_fit: project.strategic_fit,
         effort: project.effort,
         risk_index: project.risk_index,
-        ...(project.roi_score != null ? { roi_score: project.roi_score } : {}),
+        roi_score: project.roi_score ?? null,
         open_task_count: parseInt(project.open_task_count, 10),
         current_sprint: sprint != null
           ? {
@@ -379,6 +380,158 @@ router.get('/:slug/sprints', async (req, res) => {
       message = err.message
     }
     console.error('[squad-api/projects] Sprints query failed:', message)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// ---------------------------------------------------------------------------
+// PATCH /api/projects/:slug — Portfolio matrix update (S11-BE-00, ARCH-021)
+//
+// Updates portfolio matrix fields (business_value, strategic_fit, effort, risk_index)
+// on a project. Any authenticated agent may call this endpoint — no ownership
+// restriction. Tool-assignment is the access gate.
+//
+// Path:   :slug (string, project identifier)
+// Body:   JSON object with optional portfolio matrix fields (1|3|5|null)
+//         Must include at least one field. Others omitted = no change.
+//
+// Returns: 200 with updated project row including computed roi_score
+//          400 if validation fails (field value not in 1|3|5, etc.)
+//          404 if project slug not found (opaque, no enumeration — SEC-A6)
+//          422 if no fields provided (Unprocessable Entity)
+//
+// SEC-31: Field allowlist — only portfolio matrix fields may be updated.
+// Mass assignment is impossible.
+// ---------------------------------------------------------------------------
+
+const PatchProjectBodySchema = z.object({
+  business_value: z
+    .union([z.literal(1), z.literal(3), z.literal(5)])
+    .nullable()
+    .optional(),
+  strategic_fit: z
+    .union([z.literal(1), z.literal(3), z.literal(5)])
+    .nullable()
+    .optional(),
+  effort: z
+    .union([z.literal(1), z.literal(3), z.literal(5)])
+    .nullable()
+    .optional(),
+  risk_index: z
+    .union([z.literal(1), z.literal(3), z.literal(5)])
+    .nullable()
+    .optional(),
+}).strict()
+
+router.patch('/:slug', async (req, res) => {
+  try {
+    const slug = req.params['slug']
+    const parsed = PatchProjectBodySchema.parse(req.body)
+
+    // SEC-31: Field allowlist via .strict() + validate at least one field is provided
+    const hasUpdate = Object.values(parsed).some((v) => v !== undefined)
+    if (!hasUpdate) {
+      res.status(422).json({ error: 'At least one portfolio matrix field must be provided' })
+      return
+    }
+
+    const client = await squadApiPool.connect()
+    try {
+      await client.query('BEGIN')
+
+      // Lookup project by slug
+      const projectResult = await client.query<{ id: string }>(
+        'SELECT id FROM projects WHERE slug = $1',
+        [slug],
+      )
+
+      const projectRow = projectResult.rows[0]
+      if (!projectRow) {
+        res.status(404).json({ error: 'Project not found' })
+        return
+      }
+
+      const projectId = parseInt(projectRow.id, 10)
+
+      // Build the UPDATE statement — only update fields that were provided
+      const updates: string[] = []
+      const values: unknown[] = [projectId]
+      let idx = 2
+
+      if (parsed.business_value !== undefined) {
+        updates.push(`business_value = $${String(idx++)}`)
+        values.push(parsed.business_value)
+      }
+      if (parsed.strategic_fit !== undefined) {
+        updates.push(`strategic_fit = $${String(idx++)}`)
+        values.push(parsed.strategic_fit)
+      }
+      if (parsed.effort !== undefined) {
+        updates.push(`effort = $${String(idx++)}`)
+        values.push(parsed.effort)
+      }
+      if (parsed.risk_index !== undefined) {
+        updates.push(`risk_index = $${String(idx++)}`)
+        values.push(parsed.risk_index)
+      }
+
+      const updateResult = await client.query<ProjectDbRow>(
+        `UPDATE projects
+         SET ${updates.join(', ')}
+         WHERE id = $1
+         RETURNING id, slug, name, description, status, owner_agent_slug,
+                   business_value, strategic_fit, effort, risk_index,
+                   CASE WHEN effort IS NULL OR effort = 0 THEN NULL ELSE (business_value * strategic_fit)::FLOAT / effort END AS roi_score,
+                   created_at, updated_at`,
+        values,
+      )
+
+      await client.query('COMMIT')
+
+      const updatedProject = updateResult.rows[0]
+      if (!updatedProject) {
+        res.status(500).json({ error: 'Update failed — project not found after UPDATE' })
+        return
+      }
+
+      res.json({
+        data: {
+          id: parseInt(updatedProject.id, 10),
+          slug: updatedProject.slug,
+          name: updatedProject.name,
+          description: updatedProject.description,
+          status: updatedProject.status,
+          owner_agent_slug: updatedProject.owner_agent_slug,
+          business_value: updatedProject.business_value,
+          strategic_fit: updatedProject.strategic_fit,
+          effort: updatedProject.effort,
+          risk_index: updatedProject.risk_index,
+          roi_score: updatedProject.roi_score ?? null,
+          created_at: updatedProject.created_at,
+          updated_at: updatedProject.updated_at,
+        },
+      })
+    } catch (err) {
+      await client.query('ROLLBACK')
+      throw err
+    } finally {
+      client.release()
+    }
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      const fieldErrors = err.errors.map((e) => ({
+        field: e.path.join('.'),
+        message: e.message,
+      }))
+      res.status(400).json({ error: 'Validation failed', fields: fieldErrors })
+      return
+    }
+
+    let message = 'Unknown error'
+    if (err instanceof Error) {
+      message = err.message
+    }
+    console.error('[squad-api/projects] PATCH failed:', message)
     res.status(500).json({ error: 'Internal server error' })
   }
 })

@@ -47,9 +47,13 @@ BEGIN;
 -- ---------------------------------------------------------------------------
 -- opensquad_app — runtime DML principal (SEC-7)
 -- ---------------------------------------------------------------------------
-CREATE ROLE IF NOT EXISTS opensquad_app
-  WITH LOGIN
-  CONNECTION LIMIT 25;
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'opensquad_app') THEN
+    CREATE ROLE opensquad_app WITH LOGIN CONNECTION LIMIT 25;
+  END IF;
+END
+$$;
 
 -- Database + schema access
 DO $$
@@ -77,9 +81,13 @@ ALTER DEFAULT PRIVILEGES FOR ROLE opensquad_migrate IN SCHEMA public
 -- ---------------------------------------------------------------------------
 -- opensquad_migrate — DDL-only migration principal (SEC-7)
 -- ---------------------------------------------------------------------------
-CREATE ROLE IF NOT EXISTS opensquad_migrate
-  WITH LOGIN
-  CONNECTION LIMIT 1;
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'opensquad_migrate') THEN
+    CREATE ROLE opensquad_migrate WITH LOGIN CONNECTION LIMIT 1;
+  END IF;
+END
+$$;
 
 -- Database + schema access
 DO $$

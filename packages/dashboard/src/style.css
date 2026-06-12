@@ -1,14 +1,130 @@
 @import "tailwindcss";
+@import "./tokens/io-tokens.css";
+
+/* ── Dashboard utility classes ──────────────────────────────────────────────
+   Canonical panel/card/table patterns using DS tokens.
+   Use these instead of repeating Tailwind bg-white border-gray-200 etc.
+──────────────────────────────────────────────────────────────────────────── */
+
+/* Card panel — replaces: bg-white border border-gray-200 rounded-xl shadow-sm */
+.ds-panel {
+  background-color: var(--io-surface-card-bg);
+  border: 1px solid var(--io-surface-border);
+  border-radius: var(--io-radius-xl);
+  box-shadow: var(--io-shadow-sm);
+}
+
+/* Panel header row — replaces: px-6 py-4 border-b border-gray-100 flex items-center justify-between */
+.ds-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--io-space-4) var(--io-space-6);
+  border-bottom: 1px solid color-mix(in srgb, var(--io-surface-border) 40%, transparent);
+}
+
+/* Section label — replaces: text-xs font-semibold uppercase tracking-widest text-[#14201E]/40 */
+.ds-label {
+  font-family: var(--io-font-body);
+  font-size: var(--io-text-xs);
+  font-weight: var(--io-fw-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: color-mix(in srgb, var(--io-dark) 40%, transparent);
+}
+
+/* Table header cell — replaces: text-[10px] font-semibold uppercase tracking-widest text-[#14201E]/30 */
+.ds-th {
+  font-family: var(--io-font-body);
+  font-size: 0.625rem;
+  font-weight: var(--io-fw-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: color-mix(in srgb, var(--io-dark) 30%, transparent);
+  text-align: left;
+  padding: var(--io-space-3) var(--io-space-5);
+}
+
+/* Table header row border */
+.ds-thead-row {
+  border-bottom: 1px solid color-mix(in srgb, var(--io-surface-border) 40%, transparent);
+}
+
+/* Table body row — replaces: border-b border-gray-50 last:border-0 hover:bg-gray-50/50 */
+.ds-tr {
+  border-bottom: 1px solid color-mix(in srgb, var(--io-surface-border) 20%, transparent);
+  transition: background-color var(--io-transition-fast);
+}
+.ds-tr:last-child { border-bottom: none; }
+.ds-tr:hover { background-color: color-mix(in srgb, var(--io-dark) 3%, transparent); }
+
+/* Stat value — replaces: text-2xl font-black text-[#14201E] */
+.ds-stat-value {
+  font-family: var(--io-font-display);
+  font-size: var(--io-text-2xl);
+  font-weight: var(--io-fw-black);
+  color: var(--io-surface-text);
+  line-height: 1;
+}
+
+/* Muted text — replaces: text-[#14201E]/30 or /40 or /50 */
+.ds-text-muted  { color: color-mix(in srgb, var(--io-dark) 40%, transparent); }
+.ds-text-faint  { color: color-mix(in srgb, var(--io-dark) 25%, transparent); }
+
+/* Status/warning banner — replaces: bg-amber-50 border border-amber-200 */
+.ds-banner-warning {
+  background-color: var(--io-warning-bg);
+  border: 1px solid var(--io-warning-border);
+  border-radius: var(--io-radius-xl);
+  padding: var(--io-space-5);
+}
+.ds-banner-warning p { color: color-mix(in srgb, var(--io-dark) 80%, var(--io-warning)); }
+
+/* Success banner — replaces: bg-[#71F79F]/10 border border-[#71F79F]/30 */
+.ds-banner-success {
+  background-color: var(--io-success-bg);
+  border: 1px solid var(--io-success-border);
+  border-radius: var(--io-radius-xl);
+  padding: var(--io-space-3) var(--io-space-5);
+}
+
+/* Filter pill button — active + inactive states */
+.ds-filter-pill {
+  padding: var(--io-space-1-5, 0.375rem) var(--io-space-3);
+  font-family: var(--io-font-body);
+  font-size: var(--io-text-xs);
+  font-weight: var(--io-fw-semibold);
+  border-radius: var(--io-radius-full);
+  border: 1px solid var(--io-surface-border);
+  background-color: var(--io-surface-card-bg);
+  color: color-mix(in srgb, var(--io-dark) 50%, transparent);
+  cursor: pointer;
+  transition: all var(--io-transition-fast);
+}
+.ds-filter-pill:hover {
+  border-color: color-mix(in srgb, var(--io-dark) 40%, transparent);
+  color: var(--io-dark);
+}
+.ds-filter-pill[aria-current="page"],
+.ds-filter-pill.active {
+  background-color: var(--io-dark);
+  color: var(--io-light);
+  border-color: var(--io-dark);
+}
+.ds-filter-pill:focus-visible {
+  outline: none;
+  box-shadow: var(--io-focus-ring);
+}
 
 @layer base {
   html {
-    font-family: 'Inter', system-ui, sans-serif;
+    font-family: var(--io-font-body);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
 
   h1, h2, h3, h4, h5, h6 {
-    font-family: 'Montserrat', system-ui, sans-serif;
+    font-family: var(--io-font-display);
   }
 
   /* Hide scrollbar visually but keep functionality */
@@ -29,22 +145,22 @@
 
 @keyframes aura-ok-pulse {
   0%, 100% {
-    filter: drop-shadow(0 0 3px #71F79F) drop-shadow(0 0 6px #71F79Faa);
+    filter: drop-shadow(0 0 3px var(--io-green)) drop-shadow(0 0 6px color-mix(in srgb, var(--io-green) 67%, transparent));
     opacity: 1;
   }
   50% {
-    filter: drop-shadow(0 0 6px #71F79F) drop-shadow(0 0 14px #71F79F88);
+    filter: drop-shadow(0 0 6px var(--io-green)) drop-shadow(0 0 14px color-mix(in srgb, var(--io-green) 53%, transparent));
     opacity: 0.85;
   }
 }
 
 @keyframes aura-degraded-pulse {
   0%, 100% {
-    filter: drop-shadow(0 0 3px #f59e0b) drop-shadow(0 0 6px #f59e0baa);
+    filter: drop-shadow(0 0 3px var(--io-warning)) drop-shadow(0 0 6px color-mix(in srgb, var(--io-warning) 67%, transparent));
     opacity: 1;
   }
   50% {
-    filter: drop-shadow(0 0 6px #f59e0b) drop-shadow(0 0 12px #f59e0b88);
+    filter: drop-shadow(0 0 6px var(--io-warning)) drop-shadow(0 0 12px color-mix(in srgb, var(--io-warning) 53%, transparent));
     opacity: 0.8;
   }
 }

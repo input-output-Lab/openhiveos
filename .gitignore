@@ -33,3 +33,7 @@ patch_routes_2.ts
 scripts/import_official_sops.ts
 scripts/import_skills_to_sops.ts
 scripts/run_ingest.ts
+
+# Runtime artifacts
+logs/
+backups/

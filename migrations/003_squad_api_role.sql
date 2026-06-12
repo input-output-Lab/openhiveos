@@ -32,7 +32,13 @@ BEGIN;
 -- ---------------------------------------------------------------------------
 -- Create the SELECT-only role
 -- ---------------------------------------------------------------------------
-CREATE ROLE IF NOT EXISTS openhiveos_reader;
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'openhiveos_reader') THEN
+    CREATE ROLE openhiveos_reader;
+  END IF;
+END
+$$;
 
 -- Allow the openhiveos runtime user to assume the reader role per-request.
 -- Required for SET LOCAL ROLE openhiveos_reader to succeed in auth middleware.

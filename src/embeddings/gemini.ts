@@ -1,4 +1,5 @@
 import { GoogleGenerativeAI, TaskType } from '@google/generative-ai'
+import { config } from '../config.js'
 
 // gemini-embedding-001 native output is 3072d.
 // pgvector HNSW supports ≤2000 dimensions, so we request 768d via
@@ -15,36 +16,13 @@ function sleep(ms: number): Promise<void> {
 // ---------------------------------------------------------------------------
 // Module-level singleton for GoogleGenerativeAI client (TASK-1721)
 //
-// Previously, a new GoogleGenerativeAI instance was created on every
-// embedContent() call, leading to high latency and redundant client
-// instantiation overhead. This singleton pattern ensures one instance
-// per module load, reused for all embedding calls.
-//
-// Lazy initialization: client is initialized on first embedContent() call.
+// Initialized at module load using the validated GEMINI_API_KEY from config.
+// Reused for all embedContent() calls to eliminate per-call instantiation overhead.
 // ---------------------------------------------------------------------------
-let modelInstance: ReturnType<
-  InstanceType<typeof GoogleGenerativeAI>['getGenerativeModel']
-> | null = null
-
-function getModel(): ReturnType<
-  InstanceType<typeof GoogleGenerativeAI>['getGenerativeModel']
-> {
-  if (modelInstance) {
-    return modelInstance
-  }
-
-  const key = process.env['GEMINI_API_KEY']
-  if (!key) {
-    throw new Error('GEMINI_API_KEY environment variable is required')
-  }
-
-  const genai = new GoogleGenerativeAI(key)
-  modelInstance = genai.getGenerativeModel({ model: 'gemini-embedding-001' })
-  return modelInstance
-}
+const genai = new GoogleGenerativeAI(config.GEMINI_API_KEY)
+const model = genai.getGenerativeModel({ model: 'gemini-embedding-001' })
 
 export async function embedContent(text: string): Promise<number[]> {
-  const model = getModel()
   let lastError: unknown
 
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {

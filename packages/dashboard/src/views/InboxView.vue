@@ -8,10 +8,9 @@
         v-for="f in STATUS_FILTERS"
         :key="f.value ?? 'all'"
         type="button"
-        class="px-3 py-1.5 text-[11px] font-semibold rounded-full border transition-colors"
-        :class="activeFilter === f.value
-          ? 'bg-[#14201E] text-white border-[#14201E]'
-          : 'bg-white text-[#14201E]/50 border-gray-200 hover:border-[#14201E]/30 hover:text-[#14201E]/70'"
+        class="ds-filter-pill"
+        :class="{ active: activeFilter === f.value }"
+        :aria-current="activeFilter === f.value ? 'page' : undefined"
         @click="setFilter(f.value)"
       >
         {{ f.label }}
@@ -19,19 +18,19 @@
     </div>
 
     <!-- Task list ───────────────────────────────────────────────────────────── -->
-    <div class="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+    <div class="ds-panel overflow-hidden">
 
       <!-- Loading skeleton -->
       <template v-if="loading && !tasks.length">
         <div
           v-for="i in 5"
           :key="i"
-          class="flex items-center gap-4 px-6 py-3.5 border-b border-gray-50 last:border-b-0"
+          class="ds-tr flex items-center gap-4 px-6 py-3.5"
         >
-          <div class="h-5 w-14 bg-gray-100 rounded-full animate-pulse" />
-          <div class="flex-1 h-4 bg-gray-100 rounded animate-pulse" />
-          <div class="h-4 w-24 bg-gray-100 rounded animate-pulse" />
-          <div class="h-4 w-16 bg-gray-100 rounded animate-pulse hidden sm:block" />
+          <div class="h-5 w-14 rounded-full animate-pulse" style="background-color: color-mix(in srgb, var(--io-surface-border) 30%, transparent);" />
+          <div class="flex-1 h-4 rounded animate-pulse" style="background-color: color-mix(in srgb, var(--io-surface-border) 20%, transparent);" />
+          <div class="h-4 w-24 rounded animate-pulse" style="background-color: color-mix(in srgb, var(--io-surface-border) 15%, transparent);" />
+          <div class="h-4 w-16 rounded animate-pulse hidden sm:block" style="background-color: color-mix(in srgb, var(--io-surface-border) 15%, transparent);" />
         </div>
       </template>
 
@@ -56,12 +55,12 @@
         v-else
         tag="ul"
         name="stagger-list"
-        class="divide-y divide-gray-50 relative"
+        class="relative"
       >
         <li
           v-for="task in tasks"
           :key="task.id"
-          class="flex items-center gap-3 px-6 py-3.5 hover:bg-gray-50/60 transition-colors group cursor-pointer"
+          class="ds-tr flex items-center gap-3 px-6 py-3.5 cursor-pointer group"
           role="button"
           tabindex="0"
           :aria-label="`View details for task: ${task.title}`"
@@ -74,29 +73,24 @@
           </DataBadge>
 
           <!-- Title -->
-          <p class="flex-1 text-sm font-medium text-[#14201E] truncate min-w-0">
+          <p class="flex-1 text-sm font-medium truncate min-w-0" style="color: var(--io-dark);">
             {{ task.title }}
           </p>
 
           <!-- Assignee -->
           <span
             v-if="task.assignee_agent_slug"
-            class="text-[11px] font-mono text-[#14201E]/40 truncate hidden sm:block max-w-[120px]"
+            class="text-xs font-mono ds-text-muted truncate hidden sm:block max-w-[120px]"
             :title="task.assignee_agent_slug"
           >
             {{ task.assignee_agent_slug }}
           </span>
-          <span
-            v-else
-            class="text-[11px] text-[#14201E]/20 hidden sm:block"
-          >
-            unassigned
-          </span>
+          <span v-else class="text-xs ds-text-faint hidden sm:block">unassigned</span>
 
           <!-- Project slug -->
           <span
             v-if="task.project_slug"
-            class="text-[11px] font-mono text-[#14201E]/30 truncate hidden md:block max-w-[100px]"
+            class="text-xs font-mono ds-text-faint truncate hidden md:block max-w-[100px]"
             :title="task.project_slug"
           >
             {{ task.project_slug }}
@@ -104,7 +98,7 @@
 
           <!-- Updated at -->
           <time
-            class="text-[11px] text-[#14201E]/25 flex-shrink-0 hidden lg:block"
+            class="text-xs ds-text-faint flex-shrink-0 hidden lg:block"
             :datetime="task.updated_at"
           >
             {{ formatRelative(task.updated_at) }}
@@ -115,12 +109,12 @@
       <!-- Load more -->
       <div
         v-if="hasMore && !loading"
-        class="px-6 py-3 border-t border-gray-100 flex items-center justify-between"
+        class="ds-panel-header"
       >
-        <span class="text-[11px] text-[#14201E]/30">Showing {{ tasks.length }} tasks</span>
+        <span class="text-xs ds-text-faint">Showing {{ tasks.length }} tasks</span>
         <button
           type="button"
-          class="text-[11px] font-semibold text-[#14201E]/50 hover:text-[#14201E]/80 transition-colors"
+          class="text-xs font-semibold ds-text-muted hover:opacity-100 transition-opacity"
           @click="loadMore"
         >
           Load more →
@@ -129,7 +123,7 @@
 
       <!-- Loading more indicator -->
       <div v-if="loading && tasks.length" class="px-6 py-3 text-center">
-        <span class="text-[11px] text-[#14201E]/30 animate-pulse">Loading…</span>
+        <span class="text-xs ds-text-faint animate-pulse">Loading…</span>
       </div>
     </div>
   </div>

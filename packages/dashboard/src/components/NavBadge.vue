@@ -10,7 +10,8 @@
   -->
   <span
     v-if="displayCount !== null"
-    class="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[9px] font-semibold leading-none bg-[#71F79F]/20 text-[#14201E]/60"
+    class="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 font-semibold leading-none"
+    style="border-radius: var(--io-radius-full); background-color: var(--io-success-bg); color: color-mix(in srgb, var(--io-dark) 60%, transparent); font-size: 0.5625rem; font-family: var(--io-font-body);"
     aria-hidden="true"
   >
     {{ displayCount }}

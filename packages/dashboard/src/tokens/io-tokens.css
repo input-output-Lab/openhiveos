@@ -1,0 +1,148 @@
+/*
+ * IO Labs Design System Tokens — Dashboard local copy
+ * Source: @io-labs/design-system
+ * Surface: Admin / Operator (Surface B — light body)
+ * Last copied: 2026-06-11
+ *
+ * To update: copy from /Users/richo/Sites/inputoutputco/design-system/src/tokens/
+ * DO NOT edit directly — edit the source and re-copy.
+ */
+
+/* ── Tailwind v4 Theme Registration ──────────────────────────────────────────
+   Registers IO Labs brand tokens as first-class Tailwind utilities.
+   Enables: bg-io-green, text-io-dark, border-io-accent-1, etc.
+   Also overrides Tailwind shadow utilities → DS hard-offset brutalist shadows.
+   And overrides font-sans → Familjen Grotesk (body/UI font).
+──────────────────────────────────────────────────────────────────────────── */
+@theme {
+  /* Brand colors as Tailwind utilities */
+  --color-io-green:     #71F79F;
+  --color-io-green-dk:  #4FD18A;
+  --color-io-dark:      #14201E;
+  --color-io-accent-1:  #3B4948;
+  --color-io-accent-2:  #1B2727;
+  --color-io-light:     #EEEEEE;
+  --color-io-app-bg:    #F6FBF7;
+
+  /* Override Tailwind shadows → DS hard-offset brutalist (no blur) */
+  --shadow-sm:  2px 2px 0 #14201E;
+  --shadow:     4px 4px 0 #14201E;
+  --shadow-md:  4px 4px 0 #14201E;
+  --shadow-lg:  6px 6px 0 #14201E;
+
+  /* Fonts — Familjen Grotesk as default sans, Montserrat as display */
+  --font-sans:    'Familjen Grotesk', system-ui, sans-serif;
+  --font-display: 'Montserrat', system-ui, sans-serif;
+
+  /* Border radius — align Tailwind rounded-* to DS scale */
+  --radius-sm: 2px;
+  --radius:    4px;
+  --radius-md: 4px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+}
+
+/* ── CSS Custom Properties ───────────────────────────────────────────────────
+   Available as var(--io-*) in any component's <style scoped> or inline CSS.
+──────────────────────────────────────────────────────────────────────────── */
+:root {
+  /* Brand primitives */
+  --io-green:      #71F79F;
+  --io-green-dark: #4FD18A;
+  --io-dark:       #14201E;
+  --io-accent-1:   #3B4948;
+  --io-accent-2:   #1B2727;
+  --io-light:      #EEEEEE;
+  --io-white:      #FFFFFF;
+  --io-app-bg:     #F6FBF7;
+
+  /* Status / Semantic colors */
+  --io-success:        #71F79F;
+  --io-success-bg:     rgba(113, 247, 159, 0.12);
+  --io-success-border: rgba(113, 247, 159, 0.35);
+
+  --io-warning:        #F5C842;
+  --io-warning-bg:     rgba(245, 200, 66, 0.12);
+  --io-warning-border: rgba(245, 200, 66, 0.35);
+
+  --io-error:          #FF5F5F;
+  --io-error-bg:       rgba(255, 95, 95, 0.10);
+  --io-error-border:   rgba(255, 95, 95, 0.30);
+
+  --io-info:           #5DB8FE;
+  --io-info-bg:        rgba(93, 184, 254, 0.10);
+  --io-info-border:    rgba(93, 184, 254, 0.30);
+
+  /* Shadows — brutalist hard-offset, zero blur */
+  --io-shadow:       4px 4px 0 var(--io-dark);
+  --io-shadow-sm:    2px 2px 0 var(--io-dark);
+  --io-shadow-lg:    6px 6px 0 var(--io-dark);
+  --io-shadow-green: 4px 4px 0 var(--io-green);
+
+  /* Focus ring (WCAG AA) */
+  --io-focus-ring: 0 0 0 2px var(--io-dark), 0 0 0 4px var(--io-green);
+
+  /* Transitions */
+  --io-transition-fast: 150ms ease;
+  --io-transition-base: 200ms ease;
+  --io-transition-slow: 300ms ease;
+
+  /* Typography */
+  --io-font-display: 'Montserrat', sans-serif;
+  --io-font-body:    'Familjen Grotesk', sans-serif;
+  --io-fw-regular:   400;
+  --io-fw-medium:    500;
+  --io-fw-semibold:  600;
+  --io-fw-bold:      700;
+  --io-fw-extrabold: 800;
+  --io-fw-black:     900;
+
+  /* Type scale */
+  --io-text-xs:   0.75rem;
+  --io-text-sm:   0.875rem;
+  --io-text-base: 1rem;
+  --io-text-lg:   1.125rem;
+  --io-text-xl:   1.25rem;
+  --io-text-2xl:  1.5rem;
+  --io-text-3xl:  1.875rem;
+  --io-text-4xl:  2.25rem;
+
+  /* Spacing (4px base grid) */
+  --io-space-1:  0.25rem;
+  --io-space-2:  0.5rem;
+  --io-space-3:  0.75rem;
+  --io-space-4:  1rem;
+  --io-space-5:  1.25rem;
+  --io-space-6:  1.5rem;
+  --io-space-8:  2rem;
+  --io-space-10: 2.5rem;
+  --io-space-12: 3rem;
+
+  /* Border radius */
+  --io-radius-none: 0;
+  --io-radius-sm:   2px;
+  --io-radius-md:   4px;
+  --io-radius-lg:   8px;
+  --io-radius-xl:   12px;
+  --io-radius-full: 9999px;
+
+  /* Layout */
+  --io-sidebar-width: 14rem;
+
+  /* Z-index */
+  --io-z-dropdown: 100;
+  --io-z-navbar:   200;
+  --io-z-modal:    300;
+  --io-z-toast:    400;
+
+  /* ── Surface B: Admin / Operator (light body) ───────────────────────── */
+  /* These are the surface context tokens consumed by all DS components.   */
+  --io-surface-bg:          var(--io-app-bg);
+  --io-surface-text:        var(--io-dark);
+  --io-surface-text-muted:  color-mix(in srgb, var(--io-dark) 50%, transparent);
+  --io-surface-border:      var(--io-accent-1);
+  --io-surface-card-bg:     var(--io-white);
+  --io-surface-card-shadow: var(--io-shadow-sm);
+  --io-surface-active-bg:   rgba(113, 247, 159, 0.10);
+  --io-surface-active-text: var(--io-dark);
+}

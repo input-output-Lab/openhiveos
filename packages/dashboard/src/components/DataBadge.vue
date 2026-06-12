@@ -1,19 +1,15 @@
 <template>
   <!--
-    DataBadge — semantic inline label for status, counts, and categories.
-    Variants: active | inactive | count | info | warning | muted
+    DataBadge — IO Labs DS badge component.
+    Variants: success | neutral | muted | count | info | warning | error
+    Legacy aliases: active → success, inactive → neutral
   -->
   <span
-    class="inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded-full whitespace-nowrap"
-    :class="variantClass"
+    class="io-badge"
+    :class="`io-badge--${resolvedVariant}`"
     v-bind="$attrs"
   >
-    <span
-      v-if="dot"
-      class="w-1.5 h-1.5 rounded-full flex-shrink-0"
-      :class="dotClass"
-      aria-hidden="true"
-    />
+    <span v-if="dot" class="io-badge__dot" aria-hidden="true" />
     <slot>{{ label }}</slot>
   </span>
 </template>
@@ -21,7 +17,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 
-type Variant = 'active' | 'inactive' | 'count' | 'info' | 'warning' | 'muted'
+type Variant = 'active' | 'inactive' | 'success' | 'neutral' | 'count' | 'info' | 'warning' | 'error' | 'muted'
 
 const props = withDefaults(defineProps<{
   variant?: Variant
@@ -32,24 +28,72 @@ const props = withDefaults(defineProps<{
   dot: false,
 })
 
-const variantClass = computed(() => {
-  switch (props.variant) {
-    case 'active':   return 'bg-[#71F79F]/20 text-[#14201E]/60'
-    case 'inactive': return 'bg-gray-100 text-[#14201E]/30'
-    case 'count':    return 'bg-[#14201E]/8 text-[#14201E]/50 font-mono'
-    case 'info':     return 'bg-blue-50 text-blue-700'
-    case 'warning':  return 'bg-amber-50 text-amber-700'
-    case 'muted':
-    default:         return 'bg-gray-100 text-[#14201E]/40'
-  }
-})
-
-const dotClass = computed(() => {
-  switch (props.variant) {
-    case 'active':   return 'bg-[#71F79F]'
-    case 'inactive': return 'bg-gray-300'
-    case 'warning':  return 'bg-amber-400'
-    default:         return 'bg-current opacity-60'
-  }
+// Map legacy variant names to canonical DS names
+const resolvedVariant = computed(() => {
+  if (props.variant === 'active')   return 'success'
+  if (props.variant === 'inactive') return 'neutral'
+  return props.variant
 })
 </script>
+
+<style scoped>
+.io-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--io-space-1);
+  padding: var(--io-space-1) var(--io-space-3);
+  font-family: var(--io-font-body);
+  font-size: var(--io-text-xs);
+  font-weight: var(--io-fw-semibold);
+  line-height: 1;
+  border-radius: var(--io-radius-full);
+  white-space: nowrap;
+  border: 1px solid transparent;
+}
+
+.io-badge__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--io-radius-full);
+  background-color: currentColor;
+  flex-shrink: 0;
+}
+
+.io-badge--success {
+  background-color: var(--io-success-bg);
+  color: var(--io-dark);
+  border-color: var(--io-success-border);
+}
+.io-badge--success .io-badge__dot { background-color: var(--io-success); }
+
+.io-badge--neutral,
+.io-badge--muted {
+  background-color: color-mix(in srgb, var(--io-dark) 7%, transparent);
+  color: color-mix(in srgb, var(--io-dark) 45%, transparent);
+}
+
+.io-badge--count {
+  background-color: color-mix(in srgb, var(--io-dark) 7%, transparent);
+  color: color-mix(in srgb, var(--io-dark) 45%, transparent);
+  font-variant-numeric: tabular-nums;
+}
+
+.io-badge--info {
+  background-color: var(--io-info-bg);
+  color: var(--io-dark);
+  border-color: var(--io-info-border);
+}
+
+.io-badge--warning {
+  background-color: var(--io-warning-bg);
+  color: var(--io-dark);
+  border-color: var(--io-warning-border);
+}
+.io-badge--warning .io-badge__dot { background-color: var(--io-warning); }
+
+.io-badge--error {
+  background-color: var(--io-error-bg);
+  color: var(--io-dark);
+  border-color: var(--io-error-border);
+}
+</style>

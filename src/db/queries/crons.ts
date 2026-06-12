@@ -259,7 +259,10 @@ export async function deleteCron(params: {
 //     The caller (CronWorker.fire) holds the FOR UPDATE SKIP LOCKED row lock
 //     and commits after this call succeeds.
 //
-// Column name: last_run_at (NOT last_fired_at — Silas correction, 2026-05-21)
+// State contract:
+//   - Columns: last_run_at (when this cron last fired), next_fire_at (when it fires next)
+//   - getDueCrons: minimal shape (id, schedule, tool_name, payload) for workers
+//   - markCronFired: updates last_run_at = NOW() and next_fire_at per cron-parser
 // ---------------------------------------------------------------------------
 
 /**

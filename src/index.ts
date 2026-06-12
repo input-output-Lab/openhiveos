@@ -156,10 +156,11 @@ server.registerTool('create_project', { description: 'Create a new project on th
   return { content: [{ type: 'text' as const, text: JSON.stringify(await handleCreateProject(args, slug)) }] }
 })
 
-// update_project — write, requires agentSlug (SEC-21)
-server.registerTool('update_project', { description: 'Update an existing project. Only the owning agent may update. Supports changing name, description, status, and portfolio matrix scores (business_value, strategic_fit, effort, risk_index).', inputSchema: updateProjectSchema.shape }, async (args, extra) => {
-  const slug = resolveCallSlug(extra)
-  return { content: [{ type: 'text' as const, text: JSON.stringify(await handleUpdateProject(args, slug)) }] }
+// update_project — write, portfolio matrix only (S11-BE-03)
+// No ownership restriction — tool-assignment is the access gate (ARCH-021).
+// Any agent with this tool may update any project's portfolio matrix fields.
+server.registerTool('update_project', { description: 'Update portfolio matrix fields (business_value, strategic_fit, effort, risk_index) on any project. All fields use 1/3/5 categorical values. Any authenticated agent may call this tool. Returns the updated project with computed ROI score.', inputSchema: updateProjectSchema.shape }, async (args) => {
+  return { content: [{ type: 'text' as const, text: JSON.stringify(await handleUpdateProject(args)) }] }
 })
 
 // query_projects — read

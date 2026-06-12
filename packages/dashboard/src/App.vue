@@ -1,5 +1,5 @@
 <template>
-  <div class="flex h-[100dvh] bg-[#F6FBF7] text-[#14201E] overflow-hidden">
+  <div class="flex h-[100dvh] overflow-hidden" style="background-color: var(--io-app-bg); color: var(--io-dark);">
     <!-- Sidebar -->
     <AppSidebar :mobile-open="sidebarOpen" @close="sidebarOpen = false" />
 
@@ -7,7 +7,7 @@
     <div class="flex flex-col flex-1 min-w-0 lg:ml-56">
 
       <!-- Mobile top bar -->
-      <header class="lg:hidden flex items-center gap-4 px-4 py-3 bg-white border-b border-gray-200 flex-shrink-0">
+      <header class="lg:hidden flex items-center gap-4 px-4 py-3 flex-shrink-0" style="background-color: var(--io-surface-card-bg); border-bottom: 1px solid var(--io-surface-border);">
         <button
           class="p-2 rounded-lg text-[#14201E]/50 hover:bg-gray-100 transition-colors"
           aria-label="Open navigation"
@@ -31,6 +31,9 @@
         </div>
       </main>
     </div>
+
+    <!-- Toast notifications -->
+    <ToastContainer />
   </div>
 </template>
 
@@ -38,6 +41,7 @@
 import { ref } from 'vue'
 import { RouterView } from 'vue-router'
 import AppSidebar from './components/AppSidebar.vue'
+import ToastContainer from './components/ToastContainer.vue'
 
 const sidebarOpen = ref(false)
 </script>

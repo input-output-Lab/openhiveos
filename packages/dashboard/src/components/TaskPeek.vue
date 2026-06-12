@@ -22,14 +22,14 @@
 
     <!-- Loading -->
     <div v-if="loading" class="flex flex-col gap-3 p-6" aria-busy="true" aria-label="Loading task details">
-      <div class="h-4 bg-gray-100 rounded animate-pulse w-3/4" />
-      <div class="h-4 bg-gray-100 rounded animate-pulse w-1/2" />
-      <div class="h-20 bg-gray-100 rounded animate-pulse mt-2" />
+      <div class="h-4 rounded animate-pulse w-3/4" style="background-color: color-mix(in srgb, var(--io-surface-border) 25%, transparent);" />
+      <div class="h-4 rounded animate-pulse w-1/2" style="background-color: color-mix(in srgb, var(--io-surface-border) 20%, transparent);" />
+      <div class="h-20 rounded animate-pulse mt-2" style="background-color: color-mix(in srgb, var(--io-surface-border) 15%, transparent);" />
     </div>
 
     <!-- Error -->
     <div v-else-if="error" class="p-6">
-      <div class="bg-red-50 border border-red-100 rounded-xl p-4 text-sm text-red-600">
+      <div class="p-4 text-sm" style="background-color: var(--io-error-bg); border: 1px solid var(--io-error-border); border-radius: var(--io-radius-xl); color: color-mix(in srgb, var(--io-error) 80%, var(--io-dark));">
         {{ error }}
       </div>
     </div>
@@ -37,57 +37,58 @@
     <!-- Content -->
     <div v-else-if="taskData" class="p-6 space-y-5">
       <!-- Meta row — project + assignee -->
-      <div class="flex flex-wrap items-center gap-2 text-xs text-[#14201E]/40">
+      <div class="flex flex-wrap items-center gap-2 text-xs ds-text-muted">
         <span v-if="taskData.task.project_slug" class="font-mono">{{ taskData.task.project_slug }}</span>
         <span v-if="taskData.task.project_slug && taskData.task.assignee_agent_slug" aria-hidden="true">·</span>
         <span v-if="taskData.task.assignee_agent_slug">{{ taskData.task.assignee_agent_slug }}</span>
-        <span v-if="!taskData.task.project_slug && !taskData.task.assignee_agent_slug" class="italic">Unassigned</span>
+        <span v-if="!taskData.task.project_slug && !taskData.task.assignee_agent_slug" class="italic ds-text-faint">Unassigned</span>
       </div>
 
       <!-- Status + id row -->
       <div class="flex items-center justify-between">
         <DataBadge :variant="statusVariant(taskData.task.status)">{{ taskData.task.status }}</DataBadge>
-        <span class="text-[11px] font-mono text-[#14201E]/25">#{{ taskData.task.id }}</span>
+        <span class="text-xs font-mono ds-text-faint">#{{ taskData.task.id }}</span>
       </div>
 
       <!-- Description -->
       <div v-if="taskData.task.description" class="space-y-1.5">
-        <p class="text-[10px] font-semibold uppercase tracking-widest text-[#14201E]/30">Description</p>
-        <p class="text-sm text-[#14201E]/70 leading-relaxed whitespace-pre-wrap">{{ taskData.task.description }}</p>
+        <p class="ds-th" style="padding:0;">Description</p>
+        <p class="text-sm leading-relaxed whitespace-pre-wrap ds-text-muted">{{ taskData.task.description }}</p>
       </div>
 
-      <div v-else class="text-sm text-[#14201E]/30 italic">No description provided.</div>
+      <div v-else class="text-sm ds-text-faint italic">No description provided.</div>
 
       <!-- Notes -->
       <div v-if="taskData.task.notes" class="space-y-1.5">
-        <p class="text-[10px] font-semibold uppercase tracking-widest text-[#14201E]/30">Notes</p>
-        <div class="bg-amber-50 border border-amber-100 rounded-lg p-3 text-xs text-amber-700 leading-relaxed whitespace-pre-wrap">
+        <p class="ds-th" style="padding:0;">Notes</p>
+        <div class="p-3 text-xs leading-relaxed whitespace-pre-wrap" style="background-color: var(--io-warning-bg); border: 1px solid var(--io-warning-border); border-radius: var(--io-radius-lg); color: color-mix(in srgb, var(--io-warning) 70%, var(--io-dark));">
           {{ taskData.task.notes }}
         </div>
       </div>
 
       <!-- GitHub PR link -->
       <div v-if="taskData.task.github_pr_url" class="space-y-1.5">
-        <p class="text-[10px] font-semibold uppercase tracking-widest text-[#14201E]/30">Pull Request</p>
+        <p class="ds-th" style="padding:0;">Pull Request</p>
         <a
           :href="taskData.task.github_pr_url"
           target="_blank"
           rel="noopener noreferrer"
-          class="text-xs text-[#14201E]/60 hover:text-[#14201E] underline underline-offset-2 break-all transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#71F79F] rounded"
+          class="text-xs underline underline-offset-2 break-all transition-colors ds-text-muted"
+          style="focus-visible:outline: none;"
         >
           {{ taskData.task.github_pr_url }}
         </a>
       </div>
 
       <!-- Timestamps -->
-      <div class="border-t border-gray-100 pt-4 space-y-2">
+      <div class="pt-4 space-y-2" style="border-top: 1px solid color-mix(in srgb, var(--io-surface-border) 35%, transparent);">
         <div class="flex justify-between text-xs">
-          <span class="text-[#14201E]/30 font-medium">Created</span>
-          <span class="text-[#14201E]/60">{{ formatDate(taskData.task.created_at) }}</span>
+          <span class="ds-text-faint font-medium">Created</span>
+          <span class="ds-text-muted">{{ formatDate(taskData.task.created_at) }}</span>
         </div>
         <div class="flex justify-between text-xs">
-          <span class="text-[#14201E]/30 font-medium">Updated</span>
-          <span class="text-[#14201E]/60">{{ formatDate(taskData.task.updated_at) }}</span>
+          <span class="ds-text-faint font-medium">Updated</span>
+          <span class="ds-text-muted">{{ formatDate(taskData.task.updated_at) }}</span>
         </div>
       </div>
     </div>

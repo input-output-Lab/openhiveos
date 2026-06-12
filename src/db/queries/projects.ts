@@ -187,3 +187,83 @@ export async function getProjectBoard(params: {
     rework_count: parseInt(row.rework_count, 10),
   }
 }
+
+// ---------------------------------------------------------------------------
+// applyPortfolioUpdate — S11-BE-03/S11-BE-00 shared function
+//
+// ARCH-021: Portfolio Matrix Value Domain (1/3/5 categorical)
+//
+// Updates portfolio matrix fields (business_value, strategic_fit, effort, risk_index)
+// on any project. NO OWNERSHIP RESTRICTION — tool-assignment is the access gate.
+//
+// Returns the updated project row with computed roi_score.
+// Throws if the project does not exist.
+//
+// ROI score computed on read: (business_value × strategic_fit) / effort
+// Returns null if any component is null or effort = 0.
+//
+// SEC-31: Field allowlist — only portfolio matrix fields may be updated.
+// Mass assignment is impossible.
+// ---------------------------------------------------------------------------
+
+export async function applyPortfolioUpdate(params: {
+  project_id: number
+  business_value?: (1 | 3 | 5) | null
+  strategic_fit?: (1 | 3 | 5) | null
+  effort?: (1 | 3 | 5) | null
+  risk_index?: (1 | 3 | 5) | null
+}): Promise<Project> {
+  // Prepare the UPDATE statement — only set fields that were explicitly passed
+  const updates: string[] = []
+  const values: unknown[] = [params.project_id]
+  let idx = 2
+
+  if (params.business_value !== undefined) {
+    updates.push(`business_value = $${String(idx++)}`)
+    values.push(params.business_value)
+  }
+  if (params.strategic_fit !== undefined) {
+    updates.push(`strategic_fit = $${String(idx++)}`)
+    values.push(params.strategic_fit)
+  }
+  if (params.effort !== undefined) {
+    updates.push(`effort = $${String(idx++)}`)
+    values.push(params.effort)
+  }
+  if (params.risk_index !== undefined) {
+    updates.push(`risk_index = $${String(idx++)}`)
+    values.push(params.risk_index)
+  }
+
+  if (updates.length === 0) {
+    // No fields to update — fetch and return the current row unchanged
+    const result = await pool.query<Project>(
+      `SELECT id, slug, name, description, status, owner_agent_slug,
+              business_value, strategic_fit, effort, risk_index,
+              (business_value * strategic_fit)::FLOAT / NULLIF(effort, 0) AS roi_score,
+              created_at, updated_at
+       FROM projects
+       WHERE id = $1`,
+      [params.project_id],
+    )
+    const row = result.rows[0]
+    if (!row) throw new Error(`[db] Project ${String(params.project_id)} not found`)
+    return row
+  }
+
+  // UPDATE with computed ROI score on return
+  const result = await pool.query<Project>(
+    `UPDATE projects
+     SET ${updates.join(', ')}
+     WHERE id = $1
+     RETURNING id, slug, name, description, status, owner_agent_slug,
+               business_value, strategic_fit, effort, risk_index,
+               (business_value * strategic_fit)::FLOAT / NULLIF(effort, 0) AS roi_score,
+               created_at, updated_at`,
+    values,
+  )
+
+  const row = result.rows[0]
+  if (!row) throw new Error(`[db] Project ${String(params.project_id)} not found (UPDATE returned no rows)`)
+  return row
+}

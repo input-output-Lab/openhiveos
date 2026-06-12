@@ -49,54 +49,63 @@
       <!-- Stat cards ────────────────────────────────────────────────────────── -->
       <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
         <!-- Open tasks -->
-        <div class="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
-          <p class="text-[10px] font-semibold uppercase tracking-widest text-[#14201E]/30 mb-1">Open Tasks</p>
-          <p class="text-2xl font-bold text-[#14201E]">{{ project.open_task_count }}</p>
+        <div class="ds-panel p-4">
+          <p class="ds-th" style="padding:0; margin-bottom: var(--io-space-1);">Open Tasks</p>
+          <p class="ds-stat-value">{{ project.open_task_count }}</p>
         </div>
 
         <!-- Owner -->
-        <div class="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
-          <p class="text-[10px] font-semibold uppercase tracking-widest text-[#14201E]/30 mb-1">Owner</p>
-          <p class="text-sm font-semibold text-[#14201E] truncate">{{ project.owner_agent_slug ?? '—' }}</p>
+        <div class="ds-panel p-4">
+          <p class="ds-th" style="padding:0; margin-bottom: var(--io-space-1);">Owner</p>
+          <p class="text-sm font-semibold truncate" style="color: var(--io-dark);">{{ project.owner_agent_slug ?? '—' }}</p>
         </div>
 
         <!-- Current sprint -->
-        <div class="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
-          <p class="text-[10px] font-semibold uppercase tracking-widest text-[#14201E]/30 mb-1">Current Sprint</p>
-          <p class="text-sm font-semibold text-[#14201E]">
+        <div class="ds-panel p-4">
+          <p class="ds-th" style="padding:0; margin-bottom: var(--io-space-1);">Current Sprint</p>
+          <p class="text-sm font-semibold" style="color: var(--io-dark);">
             {{ project.current_sprint ? `Sprint ${project.current_sprint.sprint_number}` : '—' }}
           </p>
         </div>
 
-        <!-- Updated -->
-        <div class="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
-          <p class="text-[10px] font-semibold uppercase tracking-widest text-[#14201E]/30 mb-1">Last Updated</p>
-          <p class="text-sm font-semibold text-[#14201E]">{{ formatDate(project.updated_at) }}</p>
+        <!-- ROI Score -->
+        <div class="ds-panel p-4">
+          <p class="ds-th" style="padding:0; margin-bottom: var(--io-space-1);">ROI Score</p>
+          <p v-if="project.roi_score !== null && project.roi_score !== undefined" class="ds-stat-value">{{ project.roi_score.toFixed(2) }}</p>
+          <p v-else class="ds-stat-value opacity-25">—</p>
+          <p v-if="project.roi_score !== null && project.roi_score !== undefined" class="text-xs ds-text-muted mt-1">
+            ({{ project.business_value }} × {{ project.strategic_fit }}) ÷ {{ project.effort }}
+          </p>
         </div>
       </div>
 
-      <!-- Current sprint goal (if set) ──────────────────────────────────────── -->
+      <!-- Portfolio edit form ────────────────────────────────────────────────── -->
+      <div class="ds-panel p-6">
+        <PortfolioEditForm :project="project" :on-update="handlePortfolioUpdate" />
+      </div>
+
+      <!-- Current sprint goal (if set) -->
       <div
         v-if="project.current_sprint?.sprint_goal"
-        class="bg-[#14201E]/[0.03] border border-[#14201E]/[0.07] rounded-xl px-5 py-4"
+        class="ds-panel px-5 py-4"
+        style="background-color: color-mix(in srgb, var(--io-dark) 3%, transparent);"
       >
-        <p class="text-[10px] font-semibold uppercase tracking-widest text-[#14201E]/30 mb-1">Sprint Goal</p>
-        <p class="text-sm text-[#14201E]/70 leading-relaxed">{{ project.current_sprint.sprint_goal }}</p>
+        <p class="ds-th" style="padding:0; margin-bottom: var(--io-space-1);">Sprint Goal</p>
+        <p class="text-sm ds-text-muted leading-relaxed">{{ project.current_sprint.sprint_goal }}</p>
       </div>
 
       <!-- Tasks section ──────────────────────────────────────────────────────── -->
-      <div class="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
-        <div class="flex items-center justify-between px-6 py-4 border-b border-gray-100">
-          <h2 class="text-xs font-semibold uppercase tracking-widest text-[#14201E]/40">Tasks</h2>
+      <div class="ds-panel overflow-hidden">
+        <div class="ds-panel-header">
+          <h2 class="ds-label">Tasks</h2>
           <div class="flex gap-2">
             <button
               v-for="f in TASK_STATUS_FILTERS"
               :key="f.value ?? 'all'"
               type="button"
-              class="px-2.5 py-1 text-[10px] font-semibold rounded-full border transition-colors"
-              :class="activeTaskFilter === f.value
-                ? 'bg-[#14201E] text-white border-[#14201E]'
-                : 'bg-white text-[#14201E]/50 border-gray-200 hover:border-[#14201E]/30'"
+              class="ds-filter-pill"
+              :class="{ active: activeTaskFilter === f.value }"
+              :aria-current="activeTaskFilter === f.value ? 'page' : undefined"
               @click="setTaskFilter(f.value)"
             >
               {{ f.label }}
@@ -109,11 +118,11 @@
           <div
             v-for="i in 4"
             :key="i"
-            class="flex items-center gap-4 px-6 py-3 border-b border-gray-50 last:border-b-0 animate-pulse"
+            class="ds-tr flex items-center gap-4 px-6 py-3 animate-pulse"
           >
-            <div class="h-5 w-16 bg-gray-100 rounded-full" />
-            <div class="flex-1 h-4 bg-gray-100 rounded" />
-            <div class="h-4 w-20 bg-gray-100 rounded hidden sm:block" />
+            <div class="h-5 w-16 rounded-full" style="background-color: color-mix(in srgb, var(--io-surface-border) 30%, transparent);" />
+            <div class="flex-1 h-4 rounded" style="background-color: color-mix(in srgb, var(--io-surface-border) 20%, transparent);" />
+            <div class="h-4 w-20 rounded hidden sm:block" style="background-color: color-mix(in srgb, var(--io-surface-border) 15%, transparent);" />
           </div>
         </template>
 
@@ -138,29 +147,25 @@
           v-else
           tag="ul"
           name="stagger-list"
-          class="divide-y divide-gray-50"
         >
           <li
             v-for="task in tasksData!.tasks"
             :key="task.id"
-            class="flex items-center gap-3 px-6 py-3 hover:bg-gray-50/60 transition-colors"
+            class="ds-tr flex items-center gap-3 px-6 py-3"
           >
             <DataBadge :variant="statusVariant(task.status)" class="flex-shrink-0">{{ task.status }}</DataBadge>
-            <p class="flex-1 text-sm font-medium text-[#14201E] truncate min-w-0">{{ task.title }}</p>
-            <span v-if="task.assignee_agent_slug" class="text-[11px] text-[#14201E]/40 hidden sm:block flex-shrink-0">
+            <p class="flex-1 text-sm font-medium truncate min-w-0" style="color: var(--io-dark);">{{ task.title }}</p>
+            <span v-if="task.assignee_agent_slug" class="text-xs ds-text-muted hidden sm:block flex-shrink-0">
               {{ task.assignee_agent_slug }}
             </span>
           </li>
         </TransitionGroup>
 
         <!-- Load more tasks -->
-        <div
-          v-if="tasksData?.pagination.has_more"
-          class="px-6 py-3 border-t border-gray-100 text-center"
-        >
+        <div v-if="tasksData?.pagination.has_more" class="ds-panel-header justify-center">
           <button
             type="button"
-            class="text-xs font-semibold text-[#14201E]/50 hover:text-[#14201E] transition-colors"
+            class="text-xs font-semibold ds-text-muted hover:opacity-100 transition-opacity"
             :disabled="tasksLoading"
             @click="loadMoreTasks"
           >
@@ -169,16 +174,16 @@
         </div>
       </div>
 
-      <!-- Sprint history ──────────────────────────────────────────────────────── -->
-      <div class="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
-        <div class="flex items-center justify-between px-6 py-4 border-b border-gray-100">
-          <h2 class="text-xs font-semibold uppercase tracking-widest text-[#14201E]/40">Sprint History</h2>
+      <!-- Sprint history -->
+      <div class="ds-panel overflow-hidden">
+        <div class="ds-panel-header">
+          <h2 class="ds-label">Sprint History</h2>
           <DataBadge v-if="sprintsData" variant="count">{{ sprintsData.data.length }} sprints</DataBadge>
         </div>
 
         <!-- Sprints loading -->
         <div v-if="sprintsLoading && !sprintsData" class="px-6 py-3 animate-pulse space-y-2">
-          <div v-for="i in 3" :key="i" class="h-4 bg-gray-100 rounded w-full" />
+          <div v-for="i in 3" :key="i" class="h-4 rounded w-full" style="background-color: color-mix(in srgb, var(--io-surface-border) 25%, transparent);" />
         </div>
 
         <EmptyState
@@ -217,14 +222,20 @@ import { ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { getProjectBySlug, getProjectSprints, getTasks } from '../services/squadApi'
 import { useApi } from '../composables/useApi'
+import { useToast } from '../composables/useToast'
 import type { ProjectDetail, TasksResponse, SprintsResponse } from '../types/api'
 import BreadcrumbBar from '../components/BreadcrumbBar.vue'
 import DataBadge from '../components/DataBadge.vue'
 import ErrorState from '../components/ErrorState.vue'
 import EmptyState from '../components/EmptyState.vue'
+import PortfolioEditForm from '../components/PortfolioEditForm.vue'
 
 const route = useRoute()
 const slug = route.params['slug'] as string
+
+// ─── Toast notifications ──────────────────────────────────────────────────────
+
+const { show: showToast } = useToast()
 
 // ─── Project detail ───────────────────────────────────────────────────────────
 
@@ -238,6 +249,13 @@ const { loading, error: projectError, run: _loadProject } = useApi(async () => {
 
 async function loadProject() {
   await _loadProject()
+}
+
+// ─── Portfolio update handler ─────────────────────────────────────────────────
+
+function handlePortfolioUpdate(updated: ProjectDetail) {
+  project.value = updated
+  showToast('Portfolio matrix updated successfully', 'success')
 }
 
 // ─── Tasks ────────────────────────────────────────────────────────────────────

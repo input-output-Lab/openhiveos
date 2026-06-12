@@ -23,7 +23,8 @@
     <Transition name="drawer-backdrop">
       <div
         v-if="open"
-        class="fixed inset-0 z-50 bg-[#14201E]/40 backdrop-blur-[2px]"
+        class="fixed inset-0 z-50 backdrop-blur-[2px]"
+        style="background-color: color-mix(in srgb, var(--io-dark) 40%, transparent); z-index: var(--io-z-modal);"
         aria-hidden="true"
         @click="$emit('close')"
       />
@@ -37,17 +38,19 @@
         role="dialog"
         aria-modal="true"
         :aria-labelledby="titleId"
-        class="fixed inset-y-0 right-0 z-50 flex flex-col w-full sm:max-w-lg bg-white shadow-2xl overflow-hidden"
+        class="fixed inset-y-0 right-0 flex flex-col w-full sm:max-w-lg overflow-hidden"
+        style="z-index: var(--io-z-modal); background-color: var(--io-surface-card-bg); box-shadow: var(--io-shadow-lg);"
         @keydown.tab="onTabKey"
       >
         <!-- Header -->
-        <div class="flex items-center justify-between gap-4 px-6 py-4 border-b border-gray-100 flex-shrink-0">
-          <h2 :id="titleId" class="text-[15px] font-semibold text-[#14201E] truncate">{{ title }}</h2>
+        <div class="flex items-center justify-between gap-4 px-6 py-4 flex-shrink-0" style="border-bottom: 1px solid color-mix(in srgb, var(--io-surface-border) 40%, transparent);">
+          <h2 :id="titleId" class="text-sm font-semibold truncate" style="font-family: var(--io-font-body); color: var(--io-dark);">{{ title }}</h2>
           <div class="flex items-center gap-2 flex-shrink-0">
             <slot name="header-actions" />
             <button
               type="button"
-              class="w-8 h-8 flex items-center justify-center rounded-md text-[#14201E]/40 hover:text-[#14201E]/70 hover:bg-gray-100 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#71F79F]"
+              class="w-8 h-8 flex items-center justify-center transition-colors"
+              style="border-radius: var(--io-radius-md); color: var(--io-surface-text-muted);"
               aria-label="Close drawer"
               @click="$emit('close')"
             >

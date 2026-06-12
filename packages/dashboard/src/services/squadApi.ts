@@ -13,6 +13,7 @@ import type {
   ProjectDetailResponse,
   SprintsResponse,
   SopsResponse,
+  ThoughtsResponse,
 } from '../types/api'
 
 // ---------------------------------------------------------------------------
@@ -217,6 +218,25 @@ export function getProjectSprints(slug: string, params: { limit?: number; offset
   return request<SprintsResponse>(`/api/projects/${encodeURIComponent(slug)}/sprints${qs ? `?${qs}` : ''}`)
 }
 
+/** Update portfolio matrix fields for a project. Returns updated project with recomputed roi_score. */
+export async function patchProject(
+  slug: string,
+  updates: {
+    business_value?: number | null
+    strategic_fit?: number | null
+    effort?: number | null
+    risk_index?: number | null
+  },
+): Promise<ProjectDetailResponse> {
+  return request<ProjectDetailResponse>(
+    `/api/projects/${encodeURIComponent(slug)}`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify(updates),
+    },
+  )
+}
+
 // ─── SOPs ──────────────────────────────────────────────────────────────────────
 
 export interface GetSopsParams {
@@ -235,4 +255,26 @@ export function getSops(params: GetSopsParams = {}): Promise<SopsResponse> {
   if (params.offset != null) q.set('offset', String(params.offset))
   const qs = q.toString()
   return request<SopsResponse>(`/api/sops${qs ? `?${qs}` : ''}`)
+}
+
+// ─── Thoughts ────────────────────────────────────────────────────────────────
+
+export interface GetThoughtsParams {
+  agent_slug?: string
+  thought_type?: string
+  must_surface?: boolean
+  limit?: number
+  offset?: number
+}
+
+/** Paginated thought list. Filter by agent_slug for the reasoning ledger. */
+export function getThoughts(params: GetThoughtsParams = {}): Promise<ThoughtsResponse> {
+  const q = new URLSearchParams()
+  if (params.agent_slug)            q.set('agent_slug', params.agent_slug)
+  if (params.thought_type)          q.set('thought_type', params.thought_type)
+  if (params.must_surface != null)  q.set('must_surface', String(params.must_surface))
+  if (params.limit != null)         q.set('limit', String(params.limit))
+  if (params.offset != null)        q.set('offset', String(params.offset))
+  const qs = q.toString()
+  return request<ThoughtsResponse>(`/api/thoughts${qs ? `?${qs}` : ''}`)
 }

@@ -619,6 +619,206 @@ components:
           description: Optional. Factory task ID to attribute this usage to. Links cost to a specific task in the v_cost_by_task view.
           example: 1394
 
+    # --- Projects ----------------------------------------------------------------
+    CurrentSprint:
+      type: object
+      nullable: true
+      required: [sprint_number]
+      description: The latest sprint for a project. Null when no sprints exist.
+      properties:
+        sprint_number:
+          type: integer
+          description: Monotonically increasing sprint sequence number.
+          example: 1
+        sprint_goal:
+          type: string
+          nullable: true
+          description: Human-readable sprint objective. Null if not set.
+          example: "Portal matrix ROI scoring feature"
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: ISO 8601 timestamp when the sprint started. Null if not started.
+
+    PortfolioValue:
+      type: integer
+      nullable: true
+      enum: [1, 3, 5, null]
+      description: |
+        Portfolio matrix scoring values.
+        1 = Low, 3 = Medium, 5 = High, null = Unscored.
+        Applied to: business_value, strategic_fit, effort, risk_index.
+      example: 3
+
+    ProjectRow:
+      type: object
+      required:
+        - id
+        - slug
+        - name
+        - status
+        - owner_agent_slug
+        - business_value
+        - strategic_fit
+        - effort
+        - risk_index
+        - created_at
+        - updated_at
+      description: |
+        A project from the portfolio matrix. Portfolio fields are nullable — null means
+        unscored. roi_score is computed (not stored): (business_value × strategic_fit) ÷ effort.
+        Returns null if any component is null or effort is zero (SEC-C2 computation).
+      properties:
+        id:
+          type: integer
+          description: Project primary key.
+          example: 1
+        slug:
+          type: string
+          description: URL-safe project identifier.
+          example: "openhiveos"
+        name:
+          type: string
+          description: Project display name.
+          example: "OpenHiveOS"
+        description:
+          type: string
+          nullable: true
+          description: Extended project description. Null when not provided.
+        status:
+          type: string
+          enum: [active, archived]
+          description: Project lifecycle status (SEC-C3).
+        owner_agent_slug:
+          type: string
+          nullable: true
+          description: Agent slug responsible for this project. Null when unassigned.
+          example: "murphy"
+        business_value:
+          type: integer
+          nullable: true
+          enum: [1, 3, 5, null]
+          description: |
+            Portfolio matrix dimension: Impact to business.
+            Null = not yet scored. Present in all endpoints.
+        strategic_fit:
+          type: integer
+          nullable: true
+          enum: [1, 3, 5, null]
+          description: |
+            Portfolio matrix dimension: Alignment to strategy.
+            Null = not yet scored. Present in all endpoints.
+        effort:
+          type: integer
+          nullable: true
+          enum: [1, 3, 5, null]
+          description: |
+            Portfolio matrix dimension: Estimated effort/complexity.
+            Null = not yet scored. Present in all endpoints.
+        risk_index:
+          type: integer
+          nullable: true
+          enum: [1, 3, 5, null]
+          description: |
+            Portfolio matrix dimension: Risk level.
+            Null = not yet scored. Present in all endpoints.
+        roi_score:
+          type: number
+          nullable: true
+          format: float
+          description: |
+            Computed ROI score: (business_value × strategic_fit) ÷ effort.
+            Returns null if any component is null, effort is zero, or effort is null (division by zero safety).
+            Only present when all portfolio fields are non-null and effort > 0.
+          example: 2.5
+        created_at:
+          type: string
+          format: date-time
+          description: Project creation timestamp.
+        updated_at:
+          type: string
+          format: date-time
+          description: Last modification timestamp.
+
+    ProjectDetail:
+      allOf:
+        - $ref: "#/components/schemas/ProjectRow"
+        - type: object
+          required: [open_task_count, current_sprint]
+          properties:
+            open_task_count:
+              type: integer
+              minimum: 0
+              description: Count of tasks in active statuses (todo, wip, review, rework). Computed via LEFT JOIN.
+              example: 5
+            current_sprint:
+              $ref: "#/components/schemas/CurrentSprint"
+              description: The latest sprint by sprint_number. Null when no sprints exist.
+
+    ProjectsResponse:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProjectRow"
+          description: Array of projects matching the filter and pagination parameters.
+        meta:
+          type: object
+          required: [limit, offset, has_more]
+          properties:
+            limit:
+              type: integer
+              minimum: 1
+              maximum: 100
+              description: Page size (echoed from query parameter).
+            offset:
+              type: integer
+              minimum: 0
+              description: Number of rows skipped (echoed from query parameter).
+            has_more:
+              type: boolean
+              description: True when a (limit+1)th row exists — no COUNT(*) performed (ARCH-019).
+
+    ProjectDetailResponse:
+      type: object
+      required: [project]
+      properties:
+        project:
+          $ref: "#/components/schemas/ProjectDetail"
+
+    PatchProjectRequest:
+      type: object
+      minProperties: 1
+      additionalProperties: false
+      description: |
+        Portfolio matrix update request. At least one field is required.
+        All fields are optional (omitted fields are not changed).
+        Values must be in the enum [1, 3, 5] or null (null explicitly unsets a score).
+      properties:
+        business_value:
+          type: integer
+          nullable: true
+          enum: [1, 3, 5, null]
+          description: Impact to business. 1=Low, 3=Medium, 5=High, null=Clear score.
+        strategic_fit:
+          type: integer
+          nullable: true
+          enum: [1, 3, 5, null]
+          description: Alignment to strategy. 1=Low, 3=Medium, 5=High, null=Clear score.
+        effort:
+          type: integer
+          nullable: true
+          enum: [1, 3, 5, null]
+          description: Estimated effort/complexity. 1=Low, 3=Medium, 5=High, null=Clear score.
+        risk_index:
+          type: integer
+          nullable: true
+          enum: [1, 3, 5, null]
+          description: Risk level. 1=Low, 3=Medium, 5=High, null=Clear score.
+
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
@@ -1282,6 +1482,251 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
 
   # -------------------------------------------------------------------------
+  # Projects — portfolio matrix
+  # -------------------------------------------------------------------------
+  /api/projects:
+    get:
+      operationId: getProjects
+      summary: Paginated project roster
+      description: |
+        Returns a paginated list of projects from the portfolio matrix.
+
+        **Portfolio matrix fields** (business_value, strategic_fit, effort, risk_index, roi_score)
+        are always present in the response. Null values indicate unscored dimensions.
+        roi_score is computed on-read: (business_value × strategic_fit) ÷ effort,
+        returning null if any component is null or effort is zero (SEC-C2).
+
+        **Pagination** follows the ARCH-019 model:
+        - `limit` integer [1, 100], default 25
+        - `offset` integer ≥ 0, default 0
+        - `has_more` true when a (limit+1)th row exists — no COUNT(*)
+
+        **Status filter** (status query param) is validated against the
+        `VALID_PROJECT_STATUSES` named const (SEC-C3). Default: 'active'.
+        An unrecognised value returns 400.
+
+        **Owner filter** (owner query param) matches projects.owner_agent_slug exactly.
+        Optional — omit to list all projects matching status.
+
+        Queries via `openhiveos_reader` role (SEC-A5).
+      tags: [Projects]
+      security:
+        - AgentBearer: []
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [active, archived]
+            default: active
+          description: Filter by project status (SEC-C3 allowlist). Default 'active'.
+        - name: owner
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Filter by owner_agent_slug. Exact match. Omit to list all projects for this status.
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 25
+          description: Page size.
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+          description: Number of rows to skip.
+      responses:
+        "200":
+          description: Project list returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectsResponse"
+        "400":
+          description: Invalid query parameter (unknown status, invalid limit/offset).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Database error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/projects/{slug}:
+    get:
+      operationId: getProjectBySlug
+      summary: Single project — detail with tasks and current sprint
+      description: |
+        Returns a single project with enhanced detail: open_task_count and current_sprint.
+
+        **open_task_count**: Count of tasks in active statuses (todo, wip, review, rework).
+        Computed via LEFT JOIN (zero-task projects return 0, never null; SEC-C6).
+
+        **current_sprint**: The latest sprint by sprint_number. Null when no sprints exist.
+
+        **Portfolio matrix fields** (business_value, strategic_fit, effort, risk_index, roi_score)
+        are always present. Null values indicate unscored dimensions.
+        roi_score is computed on-read: (business_value × strategic_fit) ÷ effort,
+        returning null if any component is null or effort is zero.
+
+        Returns 404 when the slug is not found. The error message does not reveal
+        the existence of other projects (SEC-A6 principle — opaque 404).
+
+        Queries via `openhiveos_reader` role (SEC-A5).
+      tags: [Projects]
+      security:
+        - AgentBearer: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Project slug (e.g. `openhiveos`).
+      responses:
+        "200":
+          description: Project detail returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectDetailResponse"
+        "401":
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Project slug not found. Error message does not enumerate valid slugs (SEC-A6).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Database error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+    patch:
+      operationId: updateProjectPortfolio
+      summary: Update project portfolio matrix scores
+      description: |
+        Updates portfolio matrix fields (business_value, strategic_fit, effort, risk_index)
+        on a project. Any authenticated agent may call this endpoint — no ownership
+        restriction. Tool-assignment is the access gate (SEC-C8).
+
+        **Request body** must include at least one portfolio field. Omitted fields are
+        not changed. Each field accepts values [1, 3, 5] or null.
+        - 1 = Low
+        - 3 = Medium
+        - 5 = High
+        - null = Clear/unset the score
+
+        **Response** returns the updated project row including the newly computed
+        roi_score: (business_value × strategic_fit) ÷ effort.
+
+        **Field allowlist** (SEC-31): Only portfolio matrix fields may be updated.
+        Mass assignment is impossible.
+
+        Wrapped in a transaction for consistency (ACID-compliant RETURNING clause).
+      tags: [Projects]
+      security:
+        - AgentBearer: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Project slug (e.g. `openhiveos`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PatchProjectRequest"
+      responses:
+        "200":
+          description: Project updated successfully. Returns the updated project with computed roi_score.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    $ref: "#/components/schemas/ProjectRow"
+        "400":
+          description: |
+            Validation failed. Possible reasons:
+            - Portfolio field value not in enum [1, 3, 5] or null
+            - Unknown field in request body
+            - Malformed JSON
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
+                  fields:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        field:
+                          type: string
+                        message:
+                          type: string
+        "401":
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Project slug not found. Error message does not enumerate valid slugs (SEC-A6).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: |
+            Unprocessable Entity. At least one portfolio field is required.
+            Empty request body or all fields omitted returns 422.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Database error or transaction failure.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # -------------------------------------------------------------------------
   # Internal — ingestion (Bridge → squad-api)
   # -------------------------------------------------------------------------
   /internal/usage:
@@ -1363,6 +1808,8 @@ tags:
     description: Thought roster — paginated, filterable by agent/type/must_surface/session. embedding + behaviour columns excluded (SEC-B1, SEC-B3).
   - name: Ethos Seal
     description: Squad constitutional document — versioned, HMAC-signed, boot-verified.
+  - name: Projects
+    description: Portfolio matrix project roster — GET paginated list or detail, PATCH portfolio scores (business_value, strategic_fit, effort, risk_index). roi_score computed on-read.
   - name: Usage
     description: LLM cost analytics for the operator dashboard.
   - name: Ingestion

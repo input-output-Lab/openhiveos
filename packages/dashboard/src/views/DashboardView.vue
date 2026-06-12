@@ -1,64 +1,61 @@
 <template>
   <div class="space-y-6">
     <!-- Zone 1 — System status strip ──────────────────────────────────────── -->
-    <div class="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
-      <div class="flex items-center justify-between px-6 py-4 border-b border-gray-100">
-        <h2 class="text-xs font-semibold uppercase tracking-widest text-[#14201E]/40">System Status</h2>
+    <div class="ds-panel overflow-hidden">
+      <div class="ds-panel-header">
+        <h2 class="ds-label">System Status</h2>
         <StatusAura />
       </div>
-      <div class="grid grid-cols-2 sm:grid-cols-4 gap-0 divide-x divide-gray-100">
-        <!-- Agents count -->
-        <div class="px-6 py-4">
-          <p class="text-[10px] font-semibold uppercase tracking-widest text-[#14201E]/30 mb-1">Agents</p>
-          <p class="text-2xl font-black text-[#14201E]">
-            <template v-if="agentsLoading"><span class="text-[#14201E]/20 animate-pulse">—</span></template>
-            <template v-else>{{ agentsData?.agents.length ?? '—' }}</template>
-          </p>
-          <p class="text-[11px] text-[#14201E]/30 mt-0.5">provisioned</p>
-        </div>
-        <!-- Active agents count -->
-        <div class="px-6 py-4">
-          <p class="text-[10px] font-semibold uppercase tracking-widest text-[#14201E]/30 mb-1">Active</p>
-          <p class="text-2xl font-black text-[#14201E]">
-            <template v-if="agentsLoading"><span class="text-[#14201E]/20 animate-pulse">—</span></template>
-            <template v-else>{{ activeAgentCount }}</template>
-          </p>
-          <p class="text-[11px] text-[#14201E]/30 mt-0.5">of {{ agentsData?.agents.length ?? 0 }}</p>
-        </div>
+      <div class="grid grid-cols-2 sm:grid-cols-4 divide-x" style="border-color: color-mix(in srgb, var(--io-surface-border) 30%, transparent);">
+        <!-- Active agents -->
+        <StatCard
+          label="Agents"
+          :value="agentsLoading ? '—' : String(activeAgentCount)"
+          :sublabel="agentsLoading ? '' : `of ${agentsData?.agents.length ?? 0} provisioned`"
+          :accent="activeAgentCount > 0 ? 'success' : 'default'"
+        />
+
+        <!-- Open tasks -->
+        <StatCard
+          label="Open Tasks"
+          :value="tasksLoading ? '—' : `${openTaskCount}${tasksHasMore ? '+' : ''}`"
+          sublabel="todo · wip · review"
+          :accent="openTaskCount > 10 ? 'warning' : 'default'"
+        />
+
         <!-- Ethos Seal -->
-        <div class="px-6 py-4">
-          <p class="text-[10px] font-semibold uppercase tracking-widest text-[#14201E]/30 mb-1">Ethos Seal</p>
+        <div class="stat-card-seal px-6 py-4">
+          <p class="ds-th" style="padding:0; margin-bottom: var(--io-space-2);">Ethos Seal</p>
           <div v-if="sealLoading" class="h-6 flex items-center">
-            <span class="text-[#14201E]/20 animate-pulse text-sm">—</span>
+            <span class="opacity-20 animate-pulse text-sm">—</span>
           </div>
-          <div v-else-if="sealData?.active" class="flex items-center gap-1.5 mt-1">
-            <span class="w-2 h-2 rounded-full bg-[#71F79F] aura-ok flex-shrink-0" />
-            <span class="text-sm font-semibold text-[#14201E]/70">v{{ sealData.active.version }} active</span>
+          <div v-else-if="sealData?.active" class="flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full aura-ok flex-shrink-0" style="background-color: var(--io-success);" />
+            <span class="text-sm font-semibold ds-text-muted">v{{ sealData.active.version }} active</span>
           </div>
-          <div v-else class="flex items-center gap-1.5 mt-1">
-            <span class="w-2 h-2 rounded-full bg-amber-400 flex-shrink-0" />
-            <span class="text-sm font-semibold text-amber-700">Not initialised</span>
+          <div v-else class="flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full flex-shrink-0" style="background-color: var(--io-warning);" />
+            <span class="text-sm font-semibold" style="color: color-mix(in srgb, var(--io-warning) 80%, var(--io-dark));">Not initialised</span>
           </div>
         </div>
-        <!-- Open Tasks — live from GET /api/tasks (S9-BE-01) -->
-        <div class="px-6 py-4">
-          <p class="text-[10px] font-semibold uppercase tracking-widest text-[#14201E]/30 mb-1">Open Tasks</p>
-          <p class="text-2xl font-black text-[#14201E]">
-            <template v-if="tasksLoading"><span class="text-[#14201E]/20 animate-pulse">—</span></template>
-            <template v-else>{{ openTaskCount }}<template v-if="tasksHasMore">+</template></template>
-          </p>
-          <p class="text-[11px] text-[#14201E]/30 mt-0.5">todo · wip · review</p>
-        </div>
+
+        <!-- Squad throughput ratio -->
+        <StatCard
+          label="Squad Throughput"
+          :value="tasksLoading ? '—' : throughputRatio"
+          sublabel="7-day done ÷ created"
+          :delta="throughputDelta"
+        />
       </div>
     </div>
 
     <!-- Zone 2 — Agent strip ───────────────────────────────────────────────── -->
-    <div class="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
-      <div class="flex items-center justify-between px-6 py-4 border-b border-gray-100">
-        <h2 class="text-xs font-semibold uppercase tracking-widest text-[#14201E]/40">Agent Strip</h2>
+    <div class="ds-panel overflow-hidden">
+      <div class="ds-panel-header">
+        <h2 class="ds-label">Agent Strip</h2>
         <RouterLink
           to="/agents"
-          class="text-[11px] font-medium text-[#14201E]/40 hover:text-[#14201E]/70 transition-colors"
+          class="ds-text-muted text-xs font-medium hover:opacity-100 transition-opacity"
         >
           View all →
         </RouterLink>
@@ -69,7 +66,8 @@
         <div
           v-for="i in 4"
           :key="i"
-          class="flex-shrink-0 w-36 h-20 bg-gray-100 rounded-lg animate-pulse"
+          class="flex-shrink-0 w-36 h-20 rounded-lg animate-pulse"
+          style="background-color: color-mix(in srgb, var(--io-surface-border) 20%, transparent);"
         />
       </div>
 
@@ -93,18 +91,19 @@
         <div
           v-for="agent in agentsPreview"
           :key="agent.slug"
-          class="flex-shrink-0 w-40 bg-gray-50 border border-gray-100 rounded-lg px-3 py-3"
+          class="flex-shrink-0 w-40 rounded-lg px-3 py-3"
+          style="background-color: color-mix(in srgb, var(--io-dark) 4%, transparent); border: 1px solid color-mix(in srgb, var(--io-surface-border) 40%, transparent);"
         >
           <div class="flex items-start justify-between gap-1 mb-1.5">
-            <p class="text-[12px] font-semibold text-[#14201E] leading-snug truncate min-w-0">
+            <p class="text-xs font-semibold leading-snug truncate min-w-0" style="color: var(--io-dark);">
               {{ agent.display_name }}
             </p>
             <span
               class="w-1.5 h-1.5 rounded-full flex-shrink-0 mt-1"
-              :class="agent.active ? 'bg-[#71F79F]' : 'bg-gray-300'"
+              :style="{ backgroundColor: agent.active ? 'var(--io-success)' : 'var(--io-accent-1)' }"
             />
           </div>
-          <p class="text-[10px] font-mono text-[#14201E]/30 truncate mb-2">{{ agent.slug }}</p>
+          <p class="text-xs font-mono truncate mb-2 ds-text-faint">{{ agent.slug }}</p>
           <DataBadge :variant="agent.active_task_count > 0 ? 'info' : 'muted'">
             {{ agent.active_task_count }} task{{ agent.active_task_count !== 1 ? 's' : '' }}
           </DataBadge>
@@ -119,12 +118,12 @@
     <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
 
       <!-- Inbox preview — live task strip (S9-BE-01) -->
-      <div class="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
-        <div class="flex items-center justify-between px-6 py-4 border-b border-gray-100">
-          <h2 class="text-xs font-semibold uppercase tracking-widest text-[#14201E]/40">Recent Inbox</h2>
+      <div class="ds-panel overflow-hidden">
+        <div class="ds-panel-header">
+          <h2 class="ds-label">Recent Inbox</h2>
           <RouterLink
             to="/inbox"
-            class="text-[11px] font-medium text-[#14201E]/40 hover:text-[#14201E]/70 transition-colors"
+            class="ds-text-muted text-xs font-medium hover:opacity-100 transition-opacity"
           >
             View all →
           </RouterLink>
@@ -135,10 +134,10 @@
           <div
             v-for="i in 4"
             :key="i"
-            class="flex items-center gap-3 px-6 py-3 border-b border-gray-50 last:border-b-0"
+            class="flex items-center gap-3 px-6 py-3 ds-tr"
           >
-            <div class="h-4 w-12 bg-gray-100 rounded-full animate-pulse" />
-            <div class="flex-1 h-3.5 bg-gray-100 rounded animate-pulse" />
+            <div class="h-4 w-12 rounded-full animate-pulse" style="background-color: color-mix(in srgb, var(--io-surface-border) 30%, transparent);" />
+            <div class="flex-1 h-3.5 rounded animate-pulse" style="background-color: color-mix(in srgb, var(--io-surface-border) 20%, transparent);" />
           </div>
         </template>
 
@@ -158,32 +157,32 @@
         />
 
         <!-- Task rows (max 5) -->
-        <ul v-else class="divide-y divide-gray-50">
+        <ul v-else>
           <li
             v-for="task in tasksPreview"
             :key="task.id"
-            class="flex items-center gap-3 px-6 py-3 hover:bg-gray-50/60 transition-colors"
+            class="ds-tr flex items-center gap-3 px-6 py-3"
           >
-            <DataBadge :variant="statusVariant(task.status)" class="flex-shrink-0 text-[10px]">
+            <DataBadge :variant="statusVariant(task.status)" class="flex-shrink-0">
               {{ task.status }}
             </DataBadge>
-            <p class="flex-1 text-[12px] font-medium text-[#14201E] truncate min-w-0">{{ task.title }}</p>
+            <p class="flex-1 text-xs font-medium truncate min-w-0" style="color: var(--io-dark);">{{ task.title }}</p>
             <span
               v-if="task.assignee_agent_slug"
-              class="text-[10px] font-mono text-[#14201E]/30 truncate max-w-[90px] hidden sm:block"
+              class="text-xs font-mono truncate max-w-[90px] hidden sm:block ds-text-faint"
             >{{ task.assignee_agent_slug }}</span>
           </li>
         </ul>
       </div>
 
-      <!-- Cost summary — wired to existing usage endpoint -->
-      <div class="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
-        <div class="px-6 py-4 border-b border-gray-100">
-          <h2 class="text-xs font-semibold uppercase tracking-widest text-[#14201E]/40">Cost (Last 30 Days)</h2>
+      <!-- Cost summary -->
+      <div class="ds-panel overflow-hidden">
+        <div class="ds-panel-header">
+          <h2 class="ds-label">Cost (Last 30 Days)</h2>
         </div>
         <div v-if="usageLoading" class="px-6 py-5">
-          <div class="h-8 w-24 bg-gray-100 rounded animate-pulse mb-2" />
-          <div class="h-3 w-16 bg-gray-100 rounded animate-pulse" />
+          <div class="h-8 w-24 rounded animate-pulse mb-2" style="background-color: color-mix(in srgb, var(--io-surface-border) 25%, transparent);" />
+          <div class="h-3 w-16 rounded animate-pulse" style="background-color: color-mix(in srgb, var(--io-surface-border) 15%, transparent);" />
         </div>
         <ErrorState
           v-else-if="usageError"
@@ -191,12 +190,22 @@
           title="Cost data unavailable"
           :message="usageError"
         />
-        <div v-else class="px-6 py-5">
-          <p class="text-3xl font-black text-[#14201E]">
-            ${{ totalCostUsd.toFixed(4) }}
-          </p>
-          <p class="text-[11px] text-[#14201E]/30 mt-0.5">{{ usageData?.length ?? 0 }} agent-months tracked</p>
-        </div>
+        <StatCard
+          v-else
+          label="Total (USD)"
+          :value="`$${totalCostUsd.toFixed(4)}`"
+          :sublabel="`${usageData?.length ?? 0} agent-months tracked`"
+        >
+          <template #sparkline>
+            <MiniSparkline
+              v-if="costSparklineData.length > 1"
+              :data="costSparklineData"
+              :width="80"
+              :height="20"
+              class="mt-2"
+            />
+          </template>
+        </StatCard>
       </div>
     </div>
   </div>
@@ -212,6 +221,8 @@ import StatusAura from '../components/StatusAura.vue'
 import EmptyState from '../components/EmptyState.vue'
 import ErrorState from '../components/ErrorState.vue'
 import DataBadge from '../components/DataBadge.vue'
+import StatCard from '../components/StatCard.vue'
+import MiniSparkline from '../components/MiniSparkline.vue'
 
 // ─── Seal ─────────────────────────────────────────────────────────────────────
 const { data: sealData, loading: sealLoading, run: runSeal } = useApi(getEthosSeal)
@@ -235,6 +246,11 @@ const totalCostUsd = computed(() =>
   (usageData.value ?? []).reduce((sum, row) => sum + parseFloat(row.cost_usd), 0)
 )
 
+// Cost sparkline — per-row cost values in chronological order (for MiniSparkline)
+const costSparklineData = computed<number[]>(() =>
+  (usageData.value ?? []).map(row => parseFloat(row.cost_usd)).filter(n => !isNaN(n))
+)
+
 // ─── Tasks ────────────────────────────────────────────────────────────────────
 // Fetch first 50 tasks — used for Zone 1 open-task count and Zone 3 preview strip.
 const { data: tasksData, loading: tasksLoading, error: tasksError, run: runTasks } = useApi(() => getTasks({ limit: 50 }))
@@ -249,6 +265,31 @@ const openTaskCount = computed(() =>
 const tasksPreview = computed(() =>
   (tasksData.value?.tasks ?? []).slice(0, 5)
 )
+
+// ─── Throughput ratio ─────────────────────────────────────────────────────────
+// done tasks updated in last 7 days ÷ tasks created in last 7 days
+const throughputRatio = computed<string>(() => {
+  const tasks = tasksData.value?.tasks ?? []
+  if (!tasks.length) return '—'
+  const now = Date.now()
+  const week = 7 * 24 * 60 * 60 * 1000
+  const done7d = tasks.filter(
+    (t: TaskRow) => t.status === 'done' && now - new Date(t.updated_at).getTime() < week
+  ).length
+  const created7d = tasks.filter(
+    (t: TaskRow) => now - new Date(t.created_at).getTime() < week
+  ).length
+  if (created7d === 0) return done7d > 0 ? '∞' : '—'
+  return (done7d / created7d).toFixed(1)
+})
+
+const throughputDelta = computed<{ value: string; direction: 'up' | 'down' | 'neutral' } | undefined>(() => {
+  const r = parseFloat(throughputRatio.value)
+  if (isNaN(r)) return undefined
+  if (r >= 1.0) return { value: 'On track', direction: 'up' }
+  if (r >= 0.5) return { value: 'Slowing', direction: 'neutral' }
+  return { value: 'Behind', direction: 'down' }
+})
 
 type DataBadgeVariant = 'active' | 'inactive' | 'count' | 'info' | 'warning' | 'muted'
 

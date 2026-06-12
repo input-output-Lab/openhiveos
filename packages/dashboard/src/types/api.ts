@@ -159,6 +159,9 @@ export interface TaskDetailResponse {
 
 export type ProjectStatus = 'active' | 'archived'
 
+/** Portfolio matrix value domain: 1=Low, 3=Medium, 5=High (or null if not yet scored) */
+export type PortfolioValue = 1 | 3 | 5 | null
+
 export interface ProjectRow {
   id: number
   slug: string
@@ -166,6 +169,11 @@ export interface ProjectRow {
   description: string | null
   status: ProjectStatus
   owner_agent_slug: string | null
+  business_value: PortfolioValue
+  strategic_fit: PortfolioValue
+  effort: PortfolioValue
+  risk_index: PortfolioValue
+  roi_score: number | null  // Computed: (business_value * strategic_fit) / effort, null if any component is null
   created_at: string
   updated_at: string
 }
@@ -223,4 +231,37 @@ export interface SopsPagination {
 export interface SopsResponse {
   sops: SopRow[]
   pagination: SopsPagination
+}
+// ─── Thoughts ────────────────────────────────────────────────────────────────
+
+export type ThoughtType =
+  | 'analysis'
+  | 'concern'
+  | 'decision'
+  | 'hypothesis'
+  | 'realization'
+  | 'pushback'
+
+export interface ThoughtRow {
+  id: number
+  agent_slug: string
+  session_id: string | null
+  task_id: number | null
+  thought: string
+  thought_type: ThoughtType
+  confidence: number | null
+  must_surface: boolean
+  counter_thought: string | null
+  created_at: string
+}
+
+export interface ThoughtsPagination {
+  limit: number
+  offset: number
+  has_more: boolean
+}
+
+export interface ThoughtsResponse {
+  thoughts: ThoughtRow[]
+  pagination: ThoughtsPagination
 }

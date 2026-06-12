@@ -2,23 +2,24 @@
   <!-- Backdrop (mobile only) -->
   <div
     v-if="mobileOpen"
-    class="fixed inset-0 z-30 bg-black/60 lg:hidden"
+    class="fixed inset-0 z-30 lg:hidden"
+    style="background-color: rgba(0,0,0,0.6);"
     aria-hidden="true"
     @click="$emit('close')"
   />
 
   <aside
-    :class="[
-      'fixed top-0 left-0 h-screen w-56 z-40 flex flex-col',
-      'bg-[#14201E]',
-      'transform transition-transform duration-300 ease-in-out',
-      mobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0',
-    ]"
+    class="fixed top-0 left-0 h-screen w-56 z-40 flex flex-col transform transition-transform duration-300 ease-in-out"
+    :class="mobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'"
+    style="background-color: var(--io-dark);"
     aria-label="Sidebar navigation"
   >
     <!-- Workspace header -->
-    <div class="flex items-center gap-3 px-4 py-4 flex-shrink-0 border-b border-white/[0.07]">
-      <!-- Hexagon mark -->
+    <div
+      class="flex items-center gap-3 px-4 py-4 flex-shrink-0"
+      style="border-bottom: 1px solid rgba(255,255,255,0.07);"
+    >
+      <!-- Hexagon mark — SVG fill attrs cannot use CSS vars, hex is correct here -->
       <div class="w-7 h-7 flex-shrink-0">
         <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
           <path
@@ -36,8 +37,8 @@
         </svg>
       </div>
       <div class="min-w-0">
-        <p class="text-white text-sm font-semibold leading-tight truncate">OpenHiveOS</p>
-        <p class="text-white/35 text-[10px] leading-tight">Operator Dashboard</p>
+        <p class="text-sm font-semibold leading-tight truncate" style="color: var(--io-light); font-family: var(--io-font-display);">OpenHiveOS</p>
+        <p class="text-xs leading-tight" style="color: rgba(255,255,255,0.35); font-family: var(--io-font-body);">Operator Dashboard</p>
       </div>
     </div>
 
@@ -45,40 +46,43 @@
     <nav class="flex-1 overflow-y-auto py-3 scrollbar-none" aria-label="Main navigation">
       <div class="px-2 space-y-0.5">
         <!-- Section label -->
-        <p class="px-2.5 pt-1 pb-1 text-[9px] font-semibold uppercase tracking-[0.12em] text-white/20">Workspace</p>
+        <p
+          class="px-2.5 pt-1 pb-1 text-xs font-semibold uppercase"
+          style="letter-spacing: 0.12em; font-size: 0.5625rem; color: rgba(255,255,255,0.2); font-family: var(--io-font-body);"
+        >Workspace</p>
 
         <!-- Active routes -->
         <RouterLink
           v-for="link in activeLinks"
           :key="link.to"
           :to="link.to"
-          :class="[
-            'flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-[13px] font-medium transition-colors duration-100',
-            isActive(link.to)
-              ? 'bg-[#71F79F]/15 text-[#71F79F]'
-              : 'text-white/50 hover:text-white/80 hover:bg-white/[0.06]',
-          ]"
+          class="sidebar-nav-link"
+          :class="{ 'sidebar-nav-link--active': isActive(link.to) }"
           @click="$emit('close')"
         >
-          <span class="w-4 text-center flex-shrink-0 text-[12px] opacity-80" aria-hidden="true">{{ link.icon }}</span>
+          <span class="w-4 text-center flex-shrink-0 text-xs opacity-80" aria-hidden="true">{{ link.icon }}</span>
           <span class="flex-1 min-w-0 truncate">{{ link.label }}</span>
           <NavBadge v-if="link.badge != null" :count="link.badge" />
         </RouterLink>
 
-        <!-- Divider + disabled routes — only shown when there are upcoming features -->
+        <!-- Divider + disabled routes -->
         <template v-if="disabledLinks.length">
-          <div class="border-t border-white/[0.06] my-2 mx-2" />
-          <p class="px-2.5 pb-1 text-[9px] font-semibold uppercase tracking-[0.12em] text-white/20">Coming soon</p>
+          <div class="my-2 mx-2" style="border-top: 1px solid rgba(255,255,255,0.06);" />
+          <p
+            class="px-2.5 pb-1 font-semibold uppercase"
+            style="font-size: 0.5625rem; letter-spacing: 0.12em; color: rgba(255,255,255,0.2); font-family: var(--io-font-body);"
+          >Coming soon</p>
 
           <span
             v-for="link in disabledLinks"
             :key="link.to"
-            class="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-[13px] font-medium text-white/20 cursor-not-allowed select-none"
+            class="flex items-center gap-2.5 px-2.5 py-1.5 text-sm font-medium cursor-not-allowed select-none"
+            style="border-radius: var(--io-radius-md); color: rgba(255,255,255,0.2); font-family: var(--io-font-body);"
             aria-disabled="true"
             :tabindex="-1"
             :title="`${link.label} — available in a future sprint`"
           >
-            <span class="w-4 text-center flex-shrink-0 text-[12px]" aria-hidden="true">{{ link.icon }}</span>
+            <span class="w-4 text-center flex-shrink-0 text-xs" aria-hidden="true">{{ link.icon }}</span>
             {{ link.label }}
           </span>
         </template>
@@ -86,9 +90,12 @@
     </nav>
 
     <!-- Footer — status + version -->
-    <div class="px-4 py-3 border-t border-white/[0.07] flex-shrink-0 flex items-center justify-between gap-2">
+    <div
+      class="px-4 py-3 flex-shrink-0 flex items-center justify-between gap-2"
+      style="border-top: 1px solid rgba(255,255,255,0.07);"
+    >
       <StatusAura />
-      <p class="text-white/20 text-[10px] font-mono flex-shrink-0">v0.1.0</p>
+      <p class="text-xs font-mono flex-shrink-0" style="color: rgba(255,255,255,0.2); font-family: var(--io-font-body);">v0.1.0</p>
     </div>
   </aside>
 </template>
@@ -108,11 +115,11 @@ const route = useRoute()
 const activeLinks: Array<{ to: string; icon: string; label: string; badge?: number }> = [
   { to: '/',         icon: '⬡', label: 'Dashboard' },
   { to: '/inbox',    icon: '◎', label: 'Inbox' },
+  { to: '/usage',    icon: '◌', label: 'Usage & Cost' },
   { to: '/agents',   icon: '◉', label: 'Agent Registry' },
   { to: '/projects', icon: '▣', label: 'Projects' },
   { to: '/sops',     icon: '◈', label: 'SOPs' },
   { to: '/org',      icon: '⬡', label: 'Org Chart' },
-  { to: '/usage',    icon: '◌', label: 'Usage' },
 ]
 
 // Disabled (future sprint) — rendered as non-interactive spans
@@ -123,3 +130,39 @@ function isActive(to: string): boolean {
   return route.path.startsWith(to)
 }
 </script>
+<style scoped>
+.sidebar-nav-link {
+  display: flex;
+  align-items: center;
+  gap: var(--io-space-2);
+  padding: var(--io-space-1) var(--io-space-2);
+  border-radius: var(--io-radius-md);
+  font-family: var(--io-font-body);
+  font-size: var(--io-text-sm);
+  font-weight: var(--io-fw-medium);
+  color: rgba(255, 255, 255, 0.5);
+  text-decoration: none;
+  transition: background-color var(--io-transition-fast), color var(--io-transition-fast);
+}
+
+.sidebar-nav-link:hover {
+  color: rgba(255, 255, 255, 0.85);
+  background-color: rgba(255, 255, 255, 0.06);
+}
+
+.sidebar-nav-link:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--io-dark), 0 0 0 4px var(--io-green);
+}
+
+.sidebar-nav-link--active {
+  background-color: var(--io-surface-active-bg);
+  color: var(--io-green);
+  font-weight: var(--io-fw-semibold);
+}
+
+.sidebar-nav-link--active:hover {
+  background-color: var(--io-surface-active-bg);
+  color: var(--io-green);
+}
+</style>

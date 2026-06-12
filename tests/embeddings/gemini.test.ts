@@ -29,46 +29,22 @@ describe('embedContent — singleton client pattern', () => {
   })
 
   describe('error handling — missing API key', () => {
-    it('should throw when GEMINI_API_KEY is not set', async () => {
+    it('should throw at module load when GEMINI_API_KEY is not set', async () => {
       // Delete the API key to simulate missing configuration
       delete process.env['GEMINI_API_KEY']
 
       // Force module reload to reset singleton
       vi.resetModules()
-      const { embedContent: embedContentFresh } = await import(
-        '../../src/embeddings/gemini.js'
-      )
 
-      await expect(embedContentFresh('test text')).rejects.toThrow(
-        'GEMINI_API_KEY environment variable is required',
-      )
-    })
-
-    it('should throw on first embedContent call if API key becomes unavailable', async () => {
-      // This tests that the error is thrown at embedContent time,
-      // not at module load time (due to lazy initialization)
-      delete process.env['GEMINI_API_KEY']
-
-      // Force module reload
-      vi.resetModules()
-      const { embedContent: embedContentFresh } = await import(
-        '../../src/embeddings/gemini.js'
-      )
-
-      // First call should throw
-      await expect(embedContentFresh('test')).rejects.toThrow(
-        'GEMINI_API_KEY environment variable is required',
-      )
-
-      // Second call should also throw (no state mutation)
-      await expect(embedContentFresh('test')).rejects.toThrow(
-        'GEMINI_API_KEY environment variable is required',
+      // Should throw when the module is imported since config.ts validates the env
+      await expect(import('../../src/embeddings/gemini.js')).rejects.toThrow(
+        '[config] Missing or invalid required environment variables: GEMINI_API_KEY',
       )
     })
   })
 
   describe('singleton behavior — client reuse', () => {
-    it('should initialize the model on first embedContent call', async () => {
+    it('should have initialized the model at module load', async () => {
       // This test assumes the API key exists and the Gemini API is reachable.
       // In CI, these tests may be skipped or use mocked responses.
       if (!process.env['GEMINI_API_KEY']) {

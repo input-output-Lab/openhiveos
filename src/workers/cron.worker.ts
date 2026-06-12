@@ -31,7 +31,10 @@
  *   - Drift-resistant scheduling: poll interval accounts for time spent in
  *     the current cycle. A 30s poll does not drift to 30s + cycle time.
  *
- * Column name: last_run_at (not last_fired_at — Silas correction, 2026-05-21)
+ * Cron state contract:
+ *   - getDueCrons selects crons with next_fire_at <= NOW()
+ *   - markCronFired updates last_run_at = NOW() and next_fire_at = <computed next>
+ *   - All columns use their canonical names (last_run_at, next_fire_at, not stale aliases)
  */
 import cronParser from 'cron-parser'
 import type { Pool, PoolClient } from 'pg'
