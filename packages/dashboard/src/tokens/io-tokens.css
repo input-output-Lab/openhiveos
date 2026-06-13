@@ -142,7 +142,7 @@
   --io-surface-text-muted:  color-mix(in srgb, var(--io-dark) 50%, transparent);
   --io-surface-border:      var(--io-accent-1);
   --io-surface-card-bg:     var(--io-white);
-  --io-surface-card-shadow: var(--io-shadow-sm);
-  --io-surface-active-bg:   rgba(113, 247, 159, 0.10);
+  --io-surface-card-shadow: none;  /* Admin surface is flat — no shadows per brand spec */
+  --io-surface-active-bg:   rgba(113, 247, 159, 0.15);  /* Updated from 0.10 per brand spec: bg-[#71F79F]/15 */
   --io-surface-active-text: var(--io-dark);
 }

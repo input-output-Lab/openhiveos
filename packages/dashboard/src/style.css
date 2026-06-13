@@ -11,7 +11,7 @@
   background-color: var(--io-surface-card-bg);
   border: 1px solid var(--io-surface-border);
   border-radius: var(--io-radius-xl);
-  box-shadow: var(--io-shadow-sm);
+  box-shadow: var(--io-surface-card-shadow);
 }
 
 /* Panel header row — replaces: px-6 py-4 border-b border-gray-100 flex items-center justify-between */
