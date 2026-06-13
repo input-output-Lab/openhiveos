@@ -201,8 +201,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
-import { RouterLink } from 'vue-router'
+import { ref, onMounted, computed, watch } from 'vue'
+import { RouterLink, useRoute } from 'vue-router'
 import { getProjects } from '../services/squadApi'
 import { useApi } from '../composables/useApi'
 import type { ProjectsResponse, ProjectRow } from '../types/api'
@@ -283,6 +283,12 @@ async function loadMore() {
 }
 
 onMounted(run)
+watch(() => route.path, () => {
+  currentOffset.value = 0
+  projectsData.value = null
+  run()
+})
+
 // ─── Sort ──────────────────────────────────────────────────────────────────────────────────
 
 type SortKey = 'updated' | 'name' | 'roi_desc' | 'roi_asc' | 'tasks_desc'

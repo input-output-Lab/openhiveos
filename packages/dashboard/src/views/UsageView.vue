@@ -93,7 +93,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { getAgentUsage } from '../services/squadApi'
 import { useApi } from '../composables/useApi'
 import PageHeader from '../components/PageHeader.vue'
@@ -101,6 +102,7 @@ import EmptyState from '../components/EmptyState.vue'
 import CardSkeleton from '../components/CardSkeleton.vue'
 import ErrorState from '../components/ErrorState.vue'
 
+const route = useRoute()
 const months = ref(6)
 
 const { data, loading, error, run: _run } = useApi(() => getAgentUsage(months.value))
@@ -111,6 +113,7 @@ async function run(): Promise<void> {
 }
 
 onMounted(run)
+watch(() => route.path, () => run())
 
 function formatMonth(iso: string): string {
   return new Date(iso).toLocaleDateString('en-AU', { month: 'short', year: 'numeric' })
