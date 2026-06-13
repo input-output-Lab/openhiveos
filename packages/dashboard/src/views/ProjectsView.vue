@@ -201,8 +201,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed, watch } from 'vue'
-import { RouterLink, useRoute } from 'vue-router'
+import { ref, onMounted, computed } from 'vue'
+import { RouterLink } from 'vue-router'
 import { getProjects } from '../services/squadApi'
 import { useApi } from '../composables/useApi'
 import type { ProjectsResponse, ProjectRow } from '../types/api'
@@ -211,8 +211,6 @@ import DataBadge from '../components/DataBadge.vue'
 import ErrorState from '../components/ErrorState.vue'
 import EmptyState from '../components/EmptyState.vue'
 import PortfolioBubbleChart from '../components/PortfolioBubbleChart.vue'
-
-const route = useRoute()
 
 // ─── View mode ────────────────────────────────────────────────────────────────
 
@@ -285,11 +283,6 @@ async function loadMore() {
 }
 
 onMounted(run)
-watch(() => route.path, () => {
-  currentOffset.value = 0
-  projectsData.value = null
-  run()
-})
 
 // ─── Sort ──────────────────────────────────────────────────────────────────────────────────
 

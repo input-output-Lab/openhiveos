@@ -119,8 +119,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onMounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { ref, onMounted } from 'vue'
 import { getSops } from '../services/squadApi'
 import { useApi } from '../composables/useApi'
 import type { SopsResponse } from '../types/api'
@@ -130,8 +129,6 @@ import ErrorState from '../components/ErrorState.vue'
 import EmptyState from '../components/EmptyState.vue'
 
 // ─── Category filter ──────────────────────────────────────────────────────────
-
-const route = useRoute()
 const VALID_CATEGORIES = ['Coding', 'DevOps', 'QA', 'Architecture', 'Documentation', 'Decision'] as const
 
 const CATEGORY_FILTERS: Array<{ label: string; value: string | null }> = [
@@ -192,11 +189,6 @@ async function loadMore() {
 }
 
 onMounted(run)
-watch(() => route.path, () => {
-  currentOffset.value = 0
-  sopsData.value = null
-  run()
-})
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 

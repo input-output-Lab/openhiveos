@@ -177,8 +177,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, computed, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { onMounted, computed } from 'vue'
 import { getEthosSealWithPayload } from '../services/squadApi'
 import { useApi } from '../composables/useApi'
 import CardSkeleton from '../components/CardSkeleton.vue'
@@ -186,9 +185,7 @@ import ErrorState from '../components/ErrorState.vue'
 import type { EthosSealFull } from '../types/api'
 
 const { data, loading, error, run } = useApi(getEthosSealWithPayload)
-const route = useRoute()
 onMounted(run)
-watch(() => route.path, () => run())
 
 /** If the active seal has a payload, return it; otherwise null. */
 const activePayload = computed((): Record<string, unknown> | null => {
