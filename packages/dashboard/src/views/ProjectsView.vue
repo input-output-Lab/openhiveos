@@ -212,6 +212,8 @@ import ErrorState from '../components/ErrorState.vue'
 import EmptyState from '../components/EmptyState.vue'
 import PortfolioBubbleChart from '../components/PortfolioBubbleChart.vue'
 
+const route = useRoute()
+
 // ─── View mode ────────────────────────────────────────────────────────────────
 
 const activeView = ref<'list' | 'chart'>('list')
