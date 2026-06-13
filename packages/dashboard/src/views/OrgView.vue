@@ -18,10 +18,10 @@
     <!-- Org chart ─────────────────────────────────────────────────────────── -->
     <div
       v-else
-      class="bg-white border border-gray-200 rounded-xl shadow-sm p-8 overflow-x-auto"
+      class="bg-white border border-gray-200 rounded-xl shadow-sm p-8 overflow-x-auto overflow-y-hidden"
     >
       <div
-        class="relative mx-auto"
+        class="relative inline-block min-w-full"
         :style="{ width: `${canvasW}px`, height: `${canvasH}px` }"
       >
         <!-- SVG connectors ─────────────────────────────────────────────────── -->
