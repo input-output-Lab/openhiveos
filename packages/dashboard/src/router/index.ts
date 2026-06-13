@@ -23,6 +23,11 @@ export const router = createRouter({
       meta: { title: 'Agent Registry' },
     },
     {
+      path: '/agents/:slug',
+      component: () => import('../views/AgentDetailView.vue'),
+      meta: { title: 'Agent Detail' },
+    },
+    {
       path: '/inbox',
       component: InboxView,
       meta: { title: 'Inbox' },

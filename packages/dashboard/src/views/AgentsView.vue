@@ -69,16 +69,21 @@
           </tr>
         </thead>
         <TransitionGroup tag="tbody" name="stagger-list">
-          <tr
+          <RouterLink
             v-for="agent in agentsData!.agents"
             :key="agent.slug"
-            class="ds-tr cursor-pointer"
-            role="button"
-            tabindex="0"
-            :aria-label="`View details for ${agent.display_name}`"
-            @click="selectedSlug = agent.slug"
-            @keydown.enter.space="selectedSlug = agent.slug"
+            :to="`/agents/${agent.slug}`"
+            custom
+            v-slot="{ navigate }"
           >
+            <tr
+              class="ds-tr cursor-pointer hover:opacity-75 transition-opacity"
+              role="button"
+              tabindex="0"
+              :aria-label="`View details for ${agent.display_name}`"
+              @click="navigate"
+              @keydown.enter.space="navigate"
+            >
             <!-- Agent name + slug -->
             <td class="px-5 py-3">
               <p class="font-semibold" style="color: var(--io-dark);">{{ agent.display_name }}</p>
@@ -109,18 +114,17 @@
             <td class="px-5 py-3 text-xs ds-text-muted hidden lg:table-cell">
               {{ formatDate(agent.last_used_at) }}
             </td>
-          </tr>
+            </tr>
+          </RouterLink>
         </TransitionGroup>
       </table>
     </div>
   </div>
-
-  <!-- Agent peek drawer -->
-  <AgentPeek :slug="selectedSlug" @close="selectedSlug = null" />
 </template>
 
 <script setup lang="ts">
-import { onMounted, computed, ref } from 'vue'
+import { onMounted, computed } from 'vue'
+import { RouterLink } from 'vue-router'
 import { getEthosSeal, getAgents } from '../services/squadApi'
 import { useApi } from '../composables/useApi'
 import CardSkeleton from '../components/CardSkeleton.vue'
@@ -128,11 +132,6 @@ import ErrorState from '../components/ErrorState.vue'
 import PageHeader from '../components/PageHeader.vue'
 import EmptyState from '../components/EmptyState.vue'
 import DataBadge from '../components/DataBadge.vue'
-import AgentPeek from '../components/AgentPeek.vue'
-
-// ─── Peek drawer ──────────────────────────────────────────────────────────────
-
-const selectedSlug = ref<string | null>(null)
 
 // Seal metadata
 const { data: sealData, loading: sealLoading, error: sealError, run: runSeal } = useApi(getEthosSeal)
@@ -140,12 +139,12 @@ const { data: sealData, loading: sealLoading, error: sealError, run: runSeal } =
 // Agent roster
 const { data: agentsData, loading: agentsLoading, error: agentsError, run: runAgents } = useApi(getAgents)
 
+const sealActive = computed(() => !sealLoading.value && !!sealData.value?.active)
+
 onMounted(() => {
   void runSeal()
   void runAgents()
 })
-
-const sealActive = computed(() => !sealLoading.value && !!sealData.value?.active)
 
 /** Days between a past ISO date and now, floored. */
 function tokenAgeDays(iso: string): number {
