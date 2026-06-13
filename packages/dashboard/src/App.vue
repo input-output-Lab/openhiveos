@@ -23,11 +23,7 @@
       <!-- Scrollable content -->
       <main class="flex-1 overflow-y-auto px-6 py-8 lg:px-10">
         <div class="max-w-5xl mx-auto">
-          <RouterView v-slot="{ Component }">
-            <Transition name="page" mode="out-in">
-              <component :is="Component" :key="$route.path" />
-            </Transition>
-          </RouterView>
+          <RouterView :key="$route.path" />
         </div>
       </main>
     </div>
@@ -44,4 +40,5 @@ import AppSidebar from './components/AppSidebar.vue'
 import ToastContainer from './components/ToastContainer.vue'
 
 const sidebarOpen = ref(false)
+
 </script>
