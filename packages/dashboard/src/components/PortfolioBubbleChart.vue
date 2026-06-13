@@ -4,55 +4,55 @@
     <div class="flex gap-4 flex-wrap text-[10px]">
       <div class="flex items-center gap-1.5">
         <div class="w-3 h-3 rounded-full bg-red-400" />
-        <span class="text-[#14201E]/60">High Risk (5)</span>
+        <span class="ds-text-muted">High Risk (5)</span>
       </div>
       <div class="flex items-center gap-1.5">
         <div class="w-3 h-3 rounded-full bg-yellow-400" />
-        <span class="text-[#14201E]/60">Medium Risk (3)</span>
+        <span class="ds-text-muted">Medium Risk (3)</span>
       </div>
       <div class="flex items-center gap-1.5">
         <div class="w-3 h-3 rounded-full bg-green-400" />
-        <span class="text-[#14201E]/60">Low Risk (1)</span>
+        <span class="ds-text-muted">Low Risk (1)</span>
       </div>
     </div>
 
     <!-- Chart canvas container ────────────────────────────────────────────────── -->
-    <div class="w-full h-full min-h-96 bg-gray-50 border border-gray-100 rounded-lg p-4 flex items-center justify-center">
+    <div class="w-full h-full min-h-96 ds-panel p-4 flex items-center justify-center">
       <template v-if="dataPoints.length > 0">
         <Bubble :data="chartData" :options="chartOptions" />
       </template>
       <template v-else>
         <div class="text-center">
-          <p class="text-sm font-semibold text-[#14201E]/40">No projects with complete portfolio data</p>
-          <p class="text-xs text-[#14201E]/30 mt-1">All four portfolio dimensions must be set to display on chart</p>
+          <p class="text-sm font-semibold ds-text-faint">No projects with complete portfolio data</p>
+          <p class="text-xs ds-text-faint mt-1">All four portfolio dimensions must be set to display on chart</p>
         </div>
       </template>
     </div>
 
     <!-- Summary ────────────────────────────────────────────────────────────────── -->
     <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[10px]">
-      <div class="bg-gray-50 border border-gray-200 rounded px-2 py-1.5">
-        <p class="text-[#14201E]/40 font-semibold">Projects Analyzed</p>
-        <p class="text-sm font-bold text-[#14201E] mt-0.5">{{ dataPoints.length }}</p>
+      <div class="ds-panel px-2 py-1.5">
+        <p class="ds-text-faint font-semibold">Projects Analyzed</p>
+        <p class="text-sm font-bold ds-text-muted mt-0.5">{{ dataPoints.length }}</p>
       </div>
-      <div class="bg-gray-50 border border-gray-200 rounded px-2 py-1.5">
-        <p class="text-[#14201E]/40 font-semibold">Avg ROI Score</p>
-        <p class="text-sm font-bold text-[#14201E] mt-0.5">{{ avgRoiScore }}</p>
+      <div class="ds-panel px-2 py-1.5">
+        <p class="ds-text-faint font-semibold">Avg ROI Score</p>
+        <p class="text-sm font-bold ds-text-muted mt-0.5">{{ avgRoiScore }}</p>
       </div>
-      <div class="bg-gray-50 border border-gray-200 rounded px-2 py-1.5">
-        <p class="text-[#14201E]/40 font-semibold">High Risk Projects</p>
-        <p class="text-sm font-bold text-[#14201E] mt-0.5">{{ highRiskCount }}</p>
+      <div class="ds-panel px-2 py-1.5">
+        <p class="ds-text-faint font-semibold">High Risk Projects</p>
+        <p class="text-sm font-bold ds-text-muted mt-0.5">{{ highRiskCount }}</p>
       </div>
-      <div class="bg-gray-50 border border-gray-200 rounded px-2 py-1.5">
-        <p class="text-[#14201E]/40 font-semibold">Avg Business Value</p>
-        <p class="text-sm font-bold text-[#14201E] mt-0.5">{{ avgBusinessValue }}</p>
+      <div class="ds-panel px-2 py-1.5">
+        <p class="ds-text-faint font-semibold">Avg Business Value</p>
+        <p class="text-sm font-bold ds-text-muted mt-0.5">{{ avgBusinessValue }}</p>
       </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { Bubble } from 'vue-chartjs'
 import {
   Chart as ChartJS,
@@ -66,6 +66,18 @@ import {
 import type { ProjectRow } from '../types/api'
 
 ChartJS.register(Title, Tooltip, Legend, PointElement, LinearScale)
+
+// ─── Get CSS token colors ─────────────────────────────────────────────────────
+
+const darkColor = ref('#14201E')
+const greenColor = ref('#71F79F')
+
+onMounted(() => {
+  const root = document.documentElement
+  const styles = getComputedStyle(root)
+  darkColor.value = styles.getPropertyValue('--io-dark').trim() || '#14201E'
+  greenColor.value = styles.getPropertyValue('--io-green').trim() || '#71F79F'
+})
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 
@@ -151,13 +163,13 @@ const chartOptions: ChartOptions<'bubble'> = {
       display: true,
       text: 'Portfolio Matrix: Strategic Impact vs. Risk',
       font: { size: 14, weight: 'bold' },
-      color: '#14201E',
+      color: darkColor.value,
     },
     tooltip: {
-      backgroundColor: '#14201E',
+      backgroundColor: darkColor.value,
       titleColor: '#fff',
       bodyColor: '#fff',
-      borderColor: '#71F79F',
+      borderColor: greenColor.value,
       borderWidth: 1,
       padding: 12,
       titleFont: { weight: 'bold', size: 12 },
@@ -193,16 +205,16 @@ const chartOptions: ChartOptions<'bubble'> = {
         display: true,
         text: 'Strategic Fit (1=Low, 3=Medium, 5=High)',
         font: { size: 11, weight: 'bold' },
-        color: '#14201E',
+        color: darkColor.value,
       },
       min: 0,
       max: 6,
       ticks: {
         stepSize: 1,
-        color: '#14201E/50',
+        color: darkColor.value,
       },
       grid: {
-        color: '#14201E/5',
+        color: `${darkColor.value}08`,
       },
     },
     y: {
@@ -210,16 +222,16 @@ const chartOptions: ChartOptions<'bubble'> = {
         display: true,
         text: 'Business Value (1=Low, 3=Medium, 5=High)',
         font: { size: 11, weight: 'bold' },
-        color: '#14201E',
+        color: darkColor.value,
       },
       min: 0,
       max: 6,
       ticks: {
         stepSize: 1,
-        color: '#14201E/50',
+        color: darkColor.value,
       },
       grid: {
-        color: '#14201E/5',
+        color: `${darkColor.value}08`,
       },
     },
   },
