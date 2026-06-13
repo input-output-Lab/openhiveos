@@ -111,11 +111,12 @@
       </div>
     </div>
 
-    <!-- Zone 3 — Inbox preview + cost card ──────────────────────────────────
+    <!-- Zone 3 — Inbox preview + projects + cost card ────────────────────────
          InboxView tasks gated on S9-BE-01 (Murphy Day 3).
+         Projects widget shows top 5 active projects.
          Cost card wired to existing /api/usage/agents.
     ─────────────────────────────────────────────────────────────────────────── -->
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
 
       <!-- Inbox preview — live task strip (S9-BE-01) -->
       <div class="ds-panel overflow-hidden">
@@ -175,6 +176,9 @@
         </ul>
       </div>
 
+      <!-- Projects preview -->
+      <ProjectsWidget />
+
       <!-- Cost summary -->
       <div class="ds-panel overflow-hidden">
         <div class="ds-panel-header">
@@ -223,6 +227,7 @@ import ErrorState from '../components/ErrorState.vue'
 import DataBadge from '../components/DataBadge.vue'
 import StatCard from '../components/StatCard.vue'
 import MiniSparkline from '../components/MiniSparkline.vue'
+import ProjectsWidget from '../components/ProjectsWidget.vue'
 
 // ─── Seal ─────────────────────────────────────────────────────────────────────
 const { data: sealData, loading: sealLoading, run: runSeal } = useApi(getEthosSeal)
