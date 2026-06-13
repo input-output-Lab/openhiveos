@@ -112,14 +112,15 @@ const route = useRoute()
 
 // Sprint 9/10 — live routes
 // badge: number → show NavBadge; undefined → no badge
+// Icons: placeholders pending design system icon component (ARCH-020)
 const activeLinks: Array<{ to: string; icon: string; label: string; badge?: number }> = [
-  { to: '/',         icon: '⬡', label: 'Dashboard' },
-  { to: '/inbox',    icon: '◎', label: 'Inbox' },
-  { to: '/usage',    icon: '◌', label: 'Usage & Cost' },
-  { to: '/agents',   icon: '◉', label: 'Agent Registry' },
-  { to: '/projects', icon: '▣', label: 'Projects' },
-  { to: '/sops',     icon: '◈', label: 'SOPs' },
-  { to: '/org',      icon: '⬡', label: 'Org Chart' },
+  { to: '/',         icon: '◆', label: 'Dashboard' },
+  { to: '/inbox',    icon: '📮', label: 'Inbox' },
+  { to: '/usage',    icon: '💰', label: 'Usage & Cost' },
+  { to: '/agents',   icon: '👥', label: 'Agent Registry' },
+  { to: '/projects', icon: '📋', label: 'Projects' },
+  { to: '/sops',     icon: '📖', label: 'SOPs' },
+  { to: '/org',      icon: '🏛️', label: 'Org Chart' },
 ]
 
 // Disabled (future sprint) — rendered as non-interactive spans
@@ -140,7 +141,7 @@ function isActive(to: string): boolean {
   font-family: var(--io-font-body);
   font-size: var(--io-text-sm);
   font-weight: var(--io-fw-medium);
-  color: rgba(255, 255, 255, 0.5);
+  color: rgba(255, 255, 255, 0.6);  /* Improved from 0.5 for better readability */
   text-decoration: none;
   transition: background-color var(--io-transition-fast), color var(--io-transition-fast);
 }
