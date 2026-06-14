@@ -15,9 +15,10 @@ import { tasksRouter } from './routes/tasks.js'
 import { projectsRouter } from './routes/projects.js'
 import { thoughtsRouter } from './routes/thoughts.js'
 import { integrationsRouter } from '../routes/integrations.js'
+import { webhooksRouter } from '../routes/webhooks.js'
 
 // ---------------------------------------------------------------------------
-// Squad API — Express 5 application factory (ARCH-012, ARCH-015)
+// Squad API — Express 5 application factory (ARCH-012, ARCH-015, ARCH-024)
 //
 // Port:    3005 (SQUAD_API_PORT env — default from config)
 // Binding: 127.0.0.1 by default (SEC-A3 — 0.0.0.0 requires reverse proxy + TLS)
@@ -57,7 +58,25 @@ const dashboardPath = fileURLToPath(new URL('../../dist/dashboard', import.meta.
 export function createSquadApiApp(): express.Application {
   const app = express()
 
-  // Parse JSON request bodies — before all route handlers
+  // ---------------------------------------------------------------------------
+  // /webhooks/* — inbound integration webhooks (ARCH-024)
+  // CRITICAL (SEC-C1): express.raw() MUST run BEFORE express.json().
+  // Raw body buffer is required for HMAC signature verification.
+  // Mounted BEFORE all other routes (including /internal and /api).
+  // Separate 200 req/min rate limiter (SEC-C2), no auth middleware.
+  // ---------------------------------------------------------------------------
+  app.use(
+    '/webhooks',
+    express.raw({ type: 'application/json' }),
+    (req, _res, next) => {
+      // Capture raw body on request object for HMAC verification in webhook handlers
+      (req as { rawBody?: Buffer }).rawBody = req.body as Buffer
+      next()
+    },
+    webhooksRouter,
+  )
+
+  // Parse JSON request bodies — before all other route handlers (except /webhooks)
   app.use(express.json())
 
   // ---------------------------------------------------------------------------
