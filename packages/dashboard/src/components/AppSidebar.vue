@@ -60,7 +60,7 @@
           :class="{ 'sidebar-nav-link--active': isActive(link.to) }"
           @click="$emit('close')"
         >
-          <span class="w-4 text-center flex-shrink-0 text-xs opacity-80" aria-hidden="true">{{ link.icon }}</span>
+          <component :is="link.icon" class="w-4 h-4 flex-shrink-0" />
           <span class="flex-1 min-w-0 truncate">{{ link.label }}</span>
           <NavBadge v-if="link.badge != null" :count="link.badge" />
         </RouterLink>
@@ -82,7 +82,7 @@
             :tabindex="-1"
             :title="`${link.label} — available in a future sprint`"
           >
-            <span class="w-4 text-center flex-shrink-0 text-xs" aria-hidden="true">{{ link.icon }}</span>
+            <component :is="link.icon" class="w-4 h-4" />
             {{ link.label }}
           </span>
         </template>
@@ -102,6 +102,7 @@
 
 <script setup lang="ts">
 import { RouterLink, useRoute } from 'vue-router'
+import { h } from 'vue'
 import StatusAura from './StatusAura.vue'
 import NavBadge from './NavBadge.vue'
 
@@ -110,21 +111,72 @@ defineEmits<{ close: [] }>()
 
 const route = useRoute()
 
+// Icon components — inline SVG (ARCH-020 compliance: DS icons only)
+const DashboardIcon = () => h('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '2' }, [
+  h('rect', { x: '3', y: '3', width: '7', height: '7' }),
+  h('rect', { x: '14', y: '3', width: '7', height: '7' }),
+  h('rect', { x: '14', y: '14', width: '7', height: '7' }),
+  h('rect', { x: '3', y: '14', width: '7', height: '7' }),
+])
+
+const InboxIcon = () => h('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '2' }, [
+  h('path', { d: 'M4 4h16c1 0 2 1 2 2v12c0 1-1 2-2 2H4c-1 0-2-1-2-2V6c0-1 1-2 2-2z' }),
+  h('path', { d: 'M2 6l9 6 9-6' }),
+])
+
+const UsageIcon = () => h('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '2' }, [
+  h('circle', { cx: '12', cy: '12', r: '9' }),
+  h('path', { d: 'M12 7v5l4 2' }),
+])
+
+const AgentsIcon = () => h('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '2' }, [
+  h('path', { d: 'M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2' }),
+  h('circle', { cx: '9', cy: '7', r: '4' }),
+  h('path', { d: 'M23 21v-2a4 4 0 0 0-3-3.87' }),
+  h('path', { d: 'M16 3.13a4 4 0 0 1 0 7.75' }),
+])
+
+const ProjectsIcon = () => h('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '2' }, [
+  h('path', { d: 'M11 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v6' }),
+  h('path', { d: 'M7 3v18' }),
+  h('path', { d: 'M3 9h18' }),
+])
+
+const SopsIcon = () => h('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '2' }, [
+  h('path', { d: 'M4 19.5A2.5 2.5 0 0 1 6.5 17H20' }),
+  h('path', { d: 'M6.5 2H20a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4' }),
+])
+
+const OrgIcon = () => h('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '2' }, [
+  h('path', { d: 'M12 3v6m0 6v6' }),
+  h('circle', { cx: '5', cy: '9', r: '2' }),
+  h('circle', { cx: '19', cy: '9', r: '2' }),
+  h('circle', { cx: '12', cy: '21', r: '2' }),
+  h('path', { d: 'M7 11l-1 1m10-2l1 1' }),
+])
+
+interface NavLink {
+  to: string
+  icon: any
+  label: string
+  badge?: number
+}
+
 // Sprint 9/10 — live routes
 // badge: number → show NavBadge; undefined → no badge
-// Icons: placeholders pending design system icon component (ARCH-020)
-const activeLinks: Array<{ to: string; icon: string; label: string; badge?: number }> = [
-  { to: '/',         icon: '◆', label: 'Dashboard' },
-  { to: '/inbox',    icon: '📮', label: 'Inbox' },
-  { to: '/usage',    icon: '💰', label: 'Usage & Cost' },
-  { to: '/agents',   icon: '👥', label: 'Agent Registry' },
-  { to: '/projects', icon: '📋', label: 'Projects' },
-  { to: '/sops',     icon: '📖', label: 'SOPs' },
-  { to: '/org',      icon: '🏛️', label: 'Org Chart' },
+// Icons: inline SVG components (ARCH-020)
+const activeLinks: NavLink[] = [
+  { to: '/',         icon: DashboardIcon, label: 'Dashboard' },
+  { to: '/inbox',    icon: InboxIcon, label: 'Inbox' },
+  { to: '/usage',    icon: UsageIcon, label: 'Usage & Cost' },
+  { to: '/agents',   icon: AgentsIcon, label: 'Agent Registry' },
+  { to: '/projects', icon: ProjectsIcon, label: 'Projects' },
+  { to: '/sops',     icon: SopsIcon, label: 'SOPs' },
+  { to: '/org',      icon: OrgIcon, label: 'Org Chart' },
 ]
 
 // Disabled (future sprint) — rendered as non-interactive spans
-const disabledLinks: Array<{ to: string; icon: string; label: string }> = []
+const disabledLinks: NavLink[] = []
 
 function isActive(to: string): boolean {
   if (to === '/') return route.path === '/'

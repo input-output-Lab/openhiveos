@@ -18,7 +18,7 @@
     <!-- Org chart ─────────────────────────────────────────────────────────── -->
     <div
       v-else
-      class="bg-white border border-gray-200 rounded-xl shadow-sm p-8 overflow-x-auto overflow-y-hidden"
+      class="bg-white border border-gray-200 rounded-xl shadow-sm p-8 overflow-x-auto"
     >
       <div
         class="relative inline-block min-w-full"

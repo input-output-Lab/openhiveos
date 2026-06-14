@@ -8,6 +8,8 @@ import SopsView from '../views/SopsView.vue'
 import ProjectsView from '../views/ProjectsView.vue'
 import ProjectDetailView from '../views/ProjectDetailView.vue'
 import OrgView from '../views/OrgView.vue'
+import IntegrationsView from '../views/IntegrationsView.vue'
+import NotFoundView from '../views/NotFoundView.vue'
 
 export const router = createRouter({
   history: createWebHistory(),
@@ -31,6 +33,11 @@ export const router = createRouter({
       path: '/inbox',
       component: InboxView,
       meta: { title: 'Inbox' },
+    },
+    {
+      path: '/integrations',
+      component: IntegrationsView,
+      meta: { title: 'External Integrations' },
     },
     // Legacy routes — preserved for now
     {
@@ -63,10 +70,11 @@ export const router = createRouter({
       component: OrgView,
       meta: { title: 'Org Chart' },
     },
-    // SPA fallback — redirect unknown routes to dashboard
+    // Catch-all — 404 Not Found
     {
       path: '/:pathMatch(.*)*',
-      redirect: '/',
+      component: NotFoundView,
+      meta: { title: 'Not Found' },
     },
   ],
 })
