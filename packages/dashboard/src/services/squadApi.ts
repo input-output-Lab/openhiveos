@@ -16,6 +16,7 @@ import type {
   ThoughtsResponse,
   IntegrationsStatusResponse,
   TriggerSyncResponse,
+  TriageInboxResponse,
 } from '../types/api'
 
 // ---------------------------------------------------------------------------
@@ -297,4 +298,9 @@ export function triggerIntegrationSync(provider: string): Promise<TriggerSyncRes
       body: JSON.stringify({ provider }),
     },
   )
+}
+
+/** Fetch triage inbox — tasks with status='triage' pending agent promotion. */
+export function getTriageInbox(): Promise<TriageInboxResponse> {
+  return request<TriageInboxResponse>('/api/integrations/triage')
 }

@@ -296,3 +296,28 @@ export interface TriggerSyncResponse {
   status: 'queued' | 'error'
   message: string
 }
+
+// ─── Triage Inbox ─────────────────────────────────────────────────────────────
+
+export type TriageTaskSyncState = 'in_sync' | 'drift' | 'error'
+
+export interface TriageTaskExternalLink {
+  provider: string
+  external_id: string
+  external_url: string | null
+  sync_state: TriageTaskSyncState
+  last_synced_at: string | null
+}
+
+export interface TriageTask {
+  id: string
+  title: string
+  description: string | null
+  external_links: TriageTaskExternalLink[]
+  created_at: string
+}
+
+export interface TriageInboxResponse {
+  count: number
+  tasks: TriageTask[]
+}

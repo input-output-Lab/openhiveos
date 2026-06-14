@@ -117,6 +117,17 @@
       </div>
     </div>
 
+    <!-- Triage Inbox Section (Sprint N+1 feature) -->
+    <div class="space-y-4">
+      <TriageInbox
+        :tasks="triageData?.tasks ?? []"
+        :is-loading="isLoadingTriage"
+        :error="triageError"
+        @task-selected="handleTriageTaskSelected"
+        @external-link-clicked="handleExternalLinkClick"
+      />
+    </div>
+
     <!-- Settings Modal -->
     <IntegrationSettingsModal
       v-if="selectedProvider"
@@ -131,8 +142,8 @@
 
 <script setup lang="ts">
 import { onMounted, onUnmounted, computed, ref, watch } from 'vue'
-import { getIntegrationsStatus, triggerIntegrationSync } from '../services/squadApi'
-import type { IntegrationsStatusResponse, IntegrationProvider, IntegrationStatus } from '../types/api'
+import { getIntegrationsStatus, triggerIntegrationSync, getTriageInbox } from '../services/squadApi'
+import type { IntegrationsStatusResponse, IntegrationProvider, IntegrationStatus, TriageInboxResponse } from '../types/api'
 import { useApi } from '../composables/useApi'
 import { useToast } from '../composables/useToast'
 import { formatRelativeTime } from '../utilities/formatTime'
@@ -141,9 +152,11 @@ import EmptyState from '../components/EmptyState.vue'
 import ErrorState from '../components/ErrorState.vue'
 import IntegrationCard from '../components/IntegrationCard.vue'
 import IntegrationSettingsModal from '../components/IntegrationSettingsModal.vue'
+import TriageInbox from '../components/TriageInbox.vue'
 
 // ─── API State ────────────────────────────────────────────────────────────────
 const { data: statusData, loading: isLoading, error, run: fetchStatus } = useApi(getIntegrationsStatus)
+const { data: triageData, loading: isLoadingTriage, error: triageError, run: fetchTriage } = useApi(getTriageInbox)
 
 // ─── UI State ─────────────────────────────────────────────────────────────────
 const isRefreshing = ref(false)
@@ -171,6 +184,7 @@ function stopAutoRefresh() {
 // ─── Load integrations on mount ───────────────────────────────────────────────
 onMounted(() => {
   fetchStatus()
+  fetchTriage()
   lastUpdated.value = new Date()
   startAutoRefresh()
 })
@@ -254,6 +268,18 @@ function handleSaveSettings(payload: { enabled: boolean }) {
   console.log(`[MVP] Save settings for ${selectedProvider.value}:`, payload)
   showToast(`${selectedProvider.value} settings saved (stub)`, 'success')
   handleCloseSettings()
+}
+
+// ─── Triage inbox handlers ────────────────────────────────────────────────────
+function handleTriageTaskSelected(taskId: string) {
+  console.log(`[#1772] Open triage task detail for task ${taskId}`)
+  // TODO: Navigate to task detail or open modal when ready (future story)
+  showToast(`Opening task ${taskId} (feature coming soon)`, 'info')
+}
+
+function handleExternalLinkClick(url: string) {
+  console.log(`[#1772] External link clicked:`, url)
+  // Log for analytics/observability (external link opened)
 }
 </script>
 
