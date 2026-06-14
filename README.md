@@ -219,6 +219,18 @@ Squads communicate via [openBridge](https://github.com/input-output-Lab/openbrid
 
 ---
 
+## Smoke Tests
+
+Verify the LLM usage ingestion path end-to-end (requires a running server and a configured `.env`):
+
+```bash
+bash scripts/smoke_report_usage.sh
+```
+
+Asserts: HTTP 201 on first POST, correct row in `llm_usage`, HTTP 409 on replay, and field-level value checks.
+
+---
+
 ## License
 
 See [LICENSE](LICENSE).
