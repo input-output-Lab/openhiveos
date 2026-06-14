@@ -265,3 +265,34 @@ export interface ThoughtsResponse {
   thoughts: ThoughtRow[]
   pagination: ThoughtsPagination
 }
+
+// ─── Integrations ─────────────────────────────────────────────────────────────
+
+export type IntegrationStatus = 'healthy' | 'degraded' | 'failed'
+export type IntegrationProvider = 'clickup' | 'jira' | 'github' | 'linear'
+
+export interface IntegrationProviderStatus {
+  provider: IntegrationProvider
+  enabled: boolean
+  last_sync: string | null          // ISO 8601
+  pending_count: number
+  failed_count: number
+  failed_oldest_at: string | null   // ISO 8601
+  last_error: string | null
+  status: IntegrationStatus
+}
+
+export interface IntegrationsStatusResponse {
+  timestamp: string                 // ISO 8601
+  providers: IntegrationProviderStatus[]
+  summary: {
+    total_pending: number
+    total_failed: number
+    status: IntegrationStatus
+  }
+}
+
+export interface TriggerSyncResponse {
+  status: 'queued' | 'error'
+  message: string
+}

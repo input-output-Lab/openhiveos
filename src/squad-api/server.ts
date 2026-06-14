@@ -14,6 +14,7 @@ import { sopsRouter } from './routes/sops.js'
 import { tasksRouter } from './routes/tasks.js'
 import { projectsRouter } from './routes/projects.js'
 import { thoughtsRouter } from './routes/thoughts.js'
+import { integrationsRouter } from '../routes/integrations.js'
 
 // ---------------------------------------------------------------------------
 // Squad API — Express 5 application factory (ARCH-012, ARCH-015)
@@ -131,6 +132,11 @@ export function createSquadApiApp(): express.Application {
   // Auth enforced upstream by authMiddleware on /api/*.
   // Queries run via withReaderRole() — SELECT-only (SEC-A5).
   app.use('/api/usage', usageRouter)
+
+  // GET /api/integrations/status — Integration health status (ARCH-024)
+  // Auth enforced upstream by authMiddleware on /api/*.
+  // Read-only query via withReaderRole() — no secrets exposed (SEC-A5, SEC-B1).
+  app.use('/api/integrations', integrationsRouter)
 
   // ---------------------------------------------------------------------------
   // /api/* 404 — must come after all /api routes so unmatched API paths return

@@ -78,6 +78,7 @@ export async function createTask(params: {
 export async function updateTask(params: {
   task_id: number
   owner_agent_slug: string
+  project_id?: number
   title?: string
   description?: string
   status?: string
@@ -89,25 +90,33 @@ export async function updateTask(params: {
 }): Promise<Task | undefined> {
   const result = await pool.query<Task>(
     `UPDATE tasks
-     SET title               = COALESCE($3, title),
-         description         = COALESCE($4, description),
-         status              = COALESCE($5, status),
-         assignee_agent_slug = CASE
-           WHEN $6 THEN NULL
-           ELSE COALESCE($7, assignee_agent_slug)
+     SET project_id          = CASE
+           WHEN $3::INTEGER IS NOT NULL AND EXISTS(
+             SELECT 1 FROM projects WHERE id = $3::INTEGER AND owner_agent_slug = $2
+           ) THEN $3::INTEGER
+           WHEN $3::INTEGER IS NOT NULL THEN project_id  -- target project not owned: no-op keeps row, caught by RETURNING check
+           ELSE project_id
          END,
-         github_pr_url       = COALESCE($8, github_pr_url),
-         notes               = COALESCE($9, notes)
+         title               = COALESCE($4, title),
+         description         = COALESCE($5, description),
+         status              = COALESCE($6, status),
+         assignee_agent_slug = CASE
+           WHEN $7 THEN NULL
+           ELSE COALESCE($8, assignee_agent_slug)
+         END,
+         github_pr_url       = COALESCE($9, github_pr_url),
+         notes               = COALESCE($10, notes)
      WHERE id = $1
        AND (
          project_id IN (SELECT id FROM projects WHERE owner_agent_slug = $2)
-         OR ($10 AND assignee_agent_slug = $2)
+         OR ($11 AND assignee_agent_slug = $2)
        )
      RETURNING id, project_id, title, description, status, assignee_agent_slug,
                github_pr_url, notes, created_at, updated_at`,
     [
       params.task_id,
       params.owner_agent_slug,
+      params.project_id ?? null,
       params.title ?? null,
       params.description ?? null,
       params.status ?? null,

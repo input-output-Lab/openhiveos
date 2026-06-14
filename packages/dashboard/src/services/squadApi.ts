@@ -14,6 +14,8 @@ import type {
   SprintsResponse,
   SopsResponse,
   ThoughtsResponse,
+  IntegrationsStatusResponse,
+  TriggerSyncResponse,
 } from '../types/api'
 
 // ---------------------------------------------------------------------------
@@ -277,4 +279,22 @@ export function getThoughts(params: GetThoughtsParams = {}): Promise<ThoughtsRes
   if (params.offset != null)        q.set('offset', String(params.offset))
   const qs = q.toString()
   return request<ThoughtsResponse>(`/api/thoughts${qs ? `?${qs}` : ''}`)
+}
+
+// ─── Integrations ───────────────────────────────────────────────────────────────
+
+/** Fetch integration status for all providers — health, queue stats, last error. */
+export function getIntegrationsStatus(): Promise<IntegrationsStatusResponse> {
+  return request<IntegrationsStatusResponse>('/api/integrations/status')
+}
+
+/** Manually trigger a sync for a specific provider. Returns { status, message }. */
+export function triggerIntegrationSync(provider: string): Promise<TriggerSyncResponse> {
+  return request<TriggerSyncResponse>(
+    '/api/integrations/trigger-sync',
+    {
+      method: 'POST',
+      body: JSON.stringify({ provider }),
+    },
+  )
 }

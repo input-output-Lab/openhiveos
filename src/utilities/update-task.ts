@@ -4,6 +4,9 @@ import { isValidAgentSlug } from '../squad/manifest.js'
 
 export const updateTaskSchema = z.object({
   task_id: z.number().int().positive(),
+  // project_id: reassign task to a different project. Target project must also
+  // be owned by the calling agent. Owner-only field.
+  project_id: z.number().int().positive().optional(),
   title: z.string().min(1).max(500).optional(),
   description: z.string().max(5000).optional(),
   // ARCH-023: `pending-close` is the assignee terminal step. `done` requires
@@ -42,6 +45,7 @@ export async function handleUpdateTask(input: UpdateTaskInput, agentSlug: string
   // Owner-only fields: anything except status. If any are present, only the
   // project owner path is valid.
   const ownerOnlyFieldsPresent =
+    parsed.project_id !== undefined ||
     parsed.title !== undefined ||
     parsed.description !== undefined ||
     parsed.unassign !== undefined ||
@@ -67,6 +71,7 @@ export async function handleUpdateTask(input: UpdateTaskInput, agentSlug: string
     task_id: parsed.task_id,
     owner_agent_slug: agentSlug,
     allowAssigneePath,
+    ...(parsed.project_id !== undefined ? { project_id: parsed.project_id } : {}),
     ...(parsed.title !== undefined ? { title: parsed.title } : {}),
     ...(parsed.description !== undefined ? { description: parsed.description } : {}),
     ...(parsed.status !== undefined ? { status: parsed.status } : {}),
