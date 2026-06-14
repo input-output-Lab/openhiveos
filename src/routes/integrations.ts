@@ -16,6 +16,7 @@
 import { Router } from 'express'
 import { withReaderRole } from '../squad-api/db.js'
 import { getIntegrationsStatus } from '../services/integrations-status.js'
+import { getTriageInbox } from '../services/integrations-triage.js'
 
 export const integrationsRouter = Router()
 
@@ -52,6 +53,43 @@ integrationsRouter.get('/status', async (_req, res) => {
     console.error('[integrations/status] Failed to compute status:', message)
     res.status(500).json({
       error: 'Failed to retrieve integration status',
+    })
+  }
+})
+
+/**
+ * GET /api/integrations/triage
+ *
+ * Fetch triage inbox: all tasks with status='triage' pending agent promotion (ARCH-024).
+ * These are external tasks (from ClickUp webhooks) that have been ingested but not yet
+ * promoted to the active task set.
+ *
+ * Response: TriageInboxResponse
+ * - count: number of tasks in triage
+ * - tasks: array of tasks with external links
+ *   - id: OpenHiveOS task ID
+ *   - title: task title
+ *   - description?: task description (nullable)
+ *   - external_links: array of provider links
+ *     - provider: 'clickup', 'jira', etc.
+ *     - external_id: provider-specific task ID
+ *     - external_url?: link to external task (nullable)
+ *     - sync_state: 'in_sync' | 'drift' | 'error'
+ *     - last_synced_at?: ISO 8601 timestamp
+ *   - created_at: ISO 8601 (when task was created)
+ */
+integrationsRouter.get('/triage', async (_req, res) => {
+  try {
+    const result = await withReaderRole(async (client) => {
+      return await getTriageInbox(client)
+    })
+
+    res.json(result)
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'unknown error'
+    console.error('[integrations/triage] Failed to fetch triage inbox:', message)
+    res.status(500).json({
+      error: 'Failed to retrieve triage inbox',
     })
   }
 })
