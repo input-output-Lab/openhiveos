@@ -15,6 +15,7 @@ graphify-out/**
 # Generated harness configs — contain plaintext agent tokens (chmod 600).
 # See docs/harness-config.md and provision/.env.tokens.
 harness/
+provision/.env.tokens
 
 # Dashboard package
 packages/dashboard/node_modules/

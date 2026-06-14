@@ -3,8 +3,8 @@ title: "SOP: Bug & Change Request Intake"
 owner: "Elizabeth"
 team: "Project Delivery"
 status: "Active"
-version: "1.0"
-last-updated: 2026-06-13
+version: "1.1"
+last-updated: 2026-06-14
 review-cycle: "Quarterly"
 signatories:
   - name: "Richo"
@@ -24,7 +24,7 @@ tags:
 # SOP: Bug & Change Request Intake
 
 > [!info] Ownership
-> **Owner:** Elizabeth · **Team:** Project Delivery · **Last Updated:** 2026-06-13 · **Next Review:** 2026-09-13
+> **Owner:** Elizabeth · **Team:** Project Delivery · **Last Updated:** 2026-06-14 · **Next Review:** 2026-09-14
 
 ---
 
@@ -167,11 +167,32 @@ Every change request must include all required fields. A CR missing the business
 
 The reporter selects the appropriate form (Bug or Change Request) and submits it via one of the following channels:
 
-| Channel | Use When |
-|---|---|
-| `docs/bug-reports/bugs.md` (append) | Internal team — any project under OpenHiveOS |
-| Email to `elizabeth@inputoutputlabs.com` | Client or external reporter |
-| ClickUp Backlog (direct task) | Reporter has ClickUp access and knows the project list ID |
+| Channel | Use When | Submission Format |
+|---|---|---|
+| `docs/bug-reports/bugs.md` (append) | Internal team — any project under OpenHiveOS | Paste complete intake form (Bug or CR) at end of file |
+| Email to `elizabeth@inputoutputlabs.com` | Client or external reporter | Full intake form in email body; attachments OK for screenshots |
+| ClickUp Backlog (direct task) | Client-facing projects with ClickUp workspace access | See **ClickUp Submission Workflow** below |
+
+### ClickUp Submission Workflow (v1.1)
+
+For projects with a ClickUp workspace (typically client-facing):
+
+**Submission:**
+1. Reporter opens the **Backlog** list in the target project
+2. Clicks **+ Add Task** and fills the form using the appropriate template:
+   - **Bug template:** Title starts with `[BUG]`, description includes intake form fields (environment, reproduction steps, business impact)
+   - **Change Request template:** Title starts with `[FEATURE]` or `[CHANGE]`, description includes intake form fields (justification, urgency, success criteria)
+3. Assigns to **Elizabeth** if known, otherwise leaves unassigned
+4. Submits the task — Elizabeth will receive a notification
+
+**Elizabeth's triage workflow:**
+1. Reviews the task within 1 business day
+2. Validates completeness — if fields missing, adds a task comment requesting specific information
+3. Updates task status to **Todo** (not Backlog)
+4. Assigns severity/priority via task tags or custom fields (per project config)
+5. Links to OpenSquad task if this is a cross-system sync (see [[sprint-workflow#Dual-System Sync Protocol]])
+
+**Dual-system sync:** For projects using both ClickUp and OpenSquad (OpenHiveOS), Elizabeth uses the `update_backlog_task` utility to keep ClickUp status in sync with OpenSquad task status. See [[sprint-workflow#Dual-System Sync Protocol]] for the complete transition table (e.g., OpenSquad `wip` → ClickUp `In Progress`).
 
 > [!warning] No Verbal Submissions
 > Bugs and change requests raised verbally in a meeting, Slack, or Telegram do **not** exist until they are in writing. The person who raises it verbally is responsible for submitting the form. Elizabeth does not transcribe verbal submissions.
@@ -259,4 +280,5 @@ Before any bug or CR becomes a task, Elizabeth confirms:
 
 | Version | Date | Change | Author |
 |---|---|---|---|
+| 1.1 | 2026-06-14 | Add ClickUp submission channel with detailed workflow; link to dual-system sync protocol | Clarence |
 | 1.0 | 2026-06-13 | Initial draft — addresses gap identified during OpenHiveOS Sprint 12 bugs.md exercise | Elizabeth + Murphy |
