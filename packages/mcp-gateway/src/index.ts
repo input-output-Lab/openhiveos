@@ -110,6 +110,41 @@ const messageRateLimiter = rateLimit({
   message: { error: 'Too many message requests. Retry later.' },
 })
 
+// ---------------------------------------------------------------------------
+// Tool invocation logging (fire-and-forget, Track 1 gateway instrumentation)
+// ARCH-015 T1-2 + T1-3 — log all tool calls to tool_invocations table.
+// ---------------------------------------------------------------------------
+
+/**
+ * Fire-and-forget INSERT to tool_invocations.
+ * Called from CallToolRequestSchema handlers to log gateway-level metrics:
+ * duration_ms (wall-clock time from pre-try to post-finally),
+ * success (true/false), and error_class (only if success=false).
+ *
+ * Failures in this function must NOT crash or corrupt the upstream
+ * tool call response. Errors are logged to stderr for operator inspection.
+ */
+function logToolInvocation(
+  agentSlug: string,
+  toolName: string,
+  transport: 'streamable_http' | 'sse',
+  durationMs: number,
+  success: boolean,
+  errorClass: string | null,
+): void {
+  void pool.query(
+    `INSERT INTO tool_invocations
+       (agent_slug, tool_name, transport, duration_ms, success, error_class)
+     VALUES ($1, $2, $3, $4, $5, $6)`,
+    [agentSlug, toolName, transport, durationMs, success, errorClass],
+  ).catch((err) => {
+    const safeErr = err instanceof Error ? err.message : String(err)
+    console.warn(
+      `[mcp-gateway] tool_invocations insert failed: agent_slug=${agentSlug} tool_name=${toolName} error=${safeErr}`,
+    )
+  })
+}
+
 /**
  * SEC-D1/D2/D3: validates ?token= query param with constant-time comparison.
  * Used by legacy /sse endpoint.
@@ -209,7 +244,22 @@ app.post('/mcp', mcpRateLimiter, resolveAgentFromBearer, express.json({ limit: '
         __agentSlug: agentSlug,
       },
     }
-    return client.callTool(augmentedParams)
+
+    // T1-2: log tool invocation to tool_invocations table (fire-and-forget)
+    const start = Date.now()
+    let success = true
+    let errorClass: string | null = null
+
+    try {
+      return await client.callTool(augmentedParams)
+    } catch (err) {
+      success = false
+      errorClass = err instanceof Error ? err.constructor.name : 'UnknownError'
+      throw err
+    } finally {
+      const durationMs = Date.now() - start
+      logToolInvocation(agentSlug, request.params.name, 'streamable_http', durationMs, success, errorClass)
+    }
   })
 
   // Stateless mode: sessionIdGenerator: undefined — no session tracking or validation.
@@ -265,7 +315,26 @@ app.get('/sse', sseRateLimiter, validateTokenQuery, async (req: Request, res: Re
   })
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
-    return client.callTool(request.params)
+    // T1-3: log tool invocation to tool_invocations table (fire-and-forget)
+    // DATA QUALITY GAP: agent_slug defaulted to 'bridge'; session registry
+    // enhancement (linking SSE sessions to calling agent identity) deferred
+    // per Silas ARCH-024 ruling 2026-06-14. Future work: resolve real agent
+    // slug from session state instead of hardcoded fallback.
+    const agentSlugForLogging = 'bridge'
+    const start = Date.now()
+    let success = true
+    let errorClass: string | null = null
+
+    try {
+      return await client.callTool(request.params)
+    } catch (err) {
+      success = false
+      errorClass = err instanceof Error ? err.constructor.name : 'UnknownError'
+      throw err
+    } finally {
+      const durationMs = Date.now() - start
+      logToolInvocation(agentSlugForLogging, request.params.name, 'sse', durationMs, success, errorClass)
+    }
   })
 
   const transport = new SSEServerTransport('/message', res)

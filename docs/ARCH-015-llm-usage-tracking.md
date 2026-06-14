@@ -237,9 +237,104 @@ Every remediation path for any one of the three violations transforms Option B i
 
 ---
 
+## Addendum: VS Code Session Identity (Non-Bridge)
+
+**Added:** 2026-06-14 (Sprint 12, Track 3)
+
+OpenHiveOS agents running in VS Code (via the Copilot Chat extension or local Agent SDK) do not use the Bridge transport. They self-report their LLM usage directly by calling the `report_usage` MCP tool at session end. This addendum documents the canonical session_id format for non-Bridge agents.
+
+### Session ID Format
+
+**Canonical format:**
+```
+<agent-slug>:vscode:<unix-ms-timestamp>
+```
+
+**Examples (by agent slug):**
+```
+murphy:vscode:1749820800000
+silas:vscode:1749820800015
+elizabeth:vscode:1749820800042
+```
+
+**Regex match:**
+```
+^[a-z][a-z0-9_-]*:[^:]+:\d{13}$
+```
+
+The middle segment (`vscode`) is the **transport discriminator**. Analytics can distinguish VS Code sessions (`:vscode:`) from Bridge sessions (`:bridge:`) by parsing this field.
+
+### Generation Rules
+
+1. **Generate once at session start**, before the first tool call.
+   - Do NOT regenerate mid-session.
+   - Do NOT use a new session_id for each loop or turn.
+   - Store it: `const SESSION_ID = '<agent-slug>:vscode:<Date.now()>'` — computed once and reused.
+
+2. **Timestamp format**: Unix epoch milliseconds (13 digits). Example: `1749820800000` = 2026-06-14 09:00:00 UTC.
+   - Ensure `Date.now()` returns milliseconds, not seconds.
+
+### report_usage Protocol at Session End
+
+At session end (after the final user request, or when the user closes the chat), call:
+
+```typescript
+mcp_openhiveos-mu_report_usage({
+  session_id: SESSION_ID,           // stored at session start
+  loop_index: 0,                    // single report per session (non-Bridge protocol)
+  agent_slug: '<your-slug>',        // e.g. 'murphy', 'silas'
+  model: 'claude-sonnet-4-5',       // or current active model
+  provider: 'anthropic',            // provider slug
+  prompt_tokens: 0,                 // see "Unavailable Data" below
+  completion_tokens: 0,             // see "Unavailable Data" below
+  cost_usd: 0                       // see "Unavailable Data" below
+})
+```
+
+**Critical:** All numeric fields are **integers**. Do not send `null` or floating-point values. `0` is valid and expected for all cost/token fields.
+
+### Unavailable Data (VS Code Session Reporting)
+
+VS Code agents do not have access to:
+- Token counts (OpenAI API visibility is not exposed by the VS Code extension)
+- LLM cost data (no real-time pricing available in the agent's environment)
+
+**Solution:** Send `0` for all token and cost fields. This is **not a schema violation**. The `llm_usage` table accepts and correctly stores zeros. The `report_usage` Zod schema defines:
+```typescript
+prompt_tokens: z.number().int().nonnegative().default(0),
+completion_tokens: z.number().int().nonnegative().default(0),
+cost_usd: z.number().nonnegative().default(0)
+```
+
+Zeros indicate "data not available in this transport," not "zero cost/tokens consumed." Analytics queries filter appropriately.
+
+### Transport Discriminator
+
+Use this field in analytics to separate data sources:
+```sql
+-- Bridge-sourced data (live cost tracking)
+SELECT * FROM llm_usage WHERE session_id LIKE '%:bridge:%'
+
+-- VS Code-sourced data (session count tracking)
+SELECT * FROM llm_usage WHERE session_id LIKE '%:vscode:%'
+```
+
+Bridge provides real token/cost data; VS Code provides session count only. Do not aggregate or compare cost across both transports without explicit filtering.
+
+### Future Work
+
+**Real token/cost capture for VS Code requires:**
+1. Deployment of an OpenAI-instrumented Bridge process to OpenHiveOS (T-01 spike, ARCH-015 O4 resolved), OR
+2. VS Code extension API expansion to expose token/cost metadata to embedded agents (out of scope, OHE team)
+
+Until one of these occurs, VS Code session reporting is visibility-only (session count + timestamp). This is acceptable for Sprint 12 and beyond — the instrumentation layer is in place and the reporting protocol is defined; cost data will flow when the upstream visibility exists.
+
+---
+
 ## Changelog
 
 | Version | Date | Author | Change |
 |---|---|---|---|
 | v1.0 | 2026-05-21 | Clarence (ADR) / Elizabeth (facilitation) / Silas (design) / Locksmith (security review) | Initial decision — Option C selected, Options A and B permanently blocked |
 | v1.1 | 2026-05-21 | Silas (F13) | OQ-4 amended — D15 trigger condition corrected per Nova's ARCH-016 cross-project flag: "third MCP server" → "second Squad Instance connects to Bridge OR Sprint 6 planning" |
+| v1.2 | 2026-06-14 | Murphy (Sprint 12 T3-1) | Added VS Code Session Identity addendum — canonical session_id format, generation rules, report_usage protocol, transport discriminator |
