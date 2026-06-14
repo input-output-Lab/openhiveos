@@ -175,7 +175,7 @@ The shared secret used by Bridge to authenticate `POST /internal/usage` requests
 
 Any system external to the Agent OS that consumes the Coordination Utilities tier to extend agent capabilities. Integrations are architecturally prohibited from accessing the OS Primitives tier directly (ARCH-005). They are not OS components — they are consumers. The boundary between Integration and Agent OS is enforced structurally: the ESLint `no-restricted-imports` rule blocks any `src/utilities/**` import from `src/primitives/**`.
 
-**Examples:** openBridge (as an integration consumer of Utilities), nova-telegram-bridge, clickup-mcp-server  
+**Examples:** openBridge (as an integration consumer of Utilities), nova-telegram-bridge  
 **See also:** Coordination Utility, OS Primitive  
 **Source:** ARCH-005, ARCH-006 Canonical Taxonomy
 
