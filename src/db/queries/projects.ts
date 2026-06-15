@@ -169,7 +169,7 @@ export async function getProjectBoard(params: {
          '[]'::json
        ) AS tasks
      FROM projects p
-     LEFT JOIN tasks t ON t.project_id = p.id
+     LEFT JOIN tasks t ON t.project_id = p.id AND t.status != 'triage'
      WHERE p.slug = $1 AND p.owner_agent_slug = $2
      GROUP BY p.id`,
     [params.slug, params.owner_agent_slug],

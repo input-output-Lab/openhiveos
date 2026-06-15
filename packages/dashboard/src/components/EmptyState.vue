@@ -1,7 +1,10 @@
 <template>
   <div class="io-empty-state">
-    <div class="io-empty-state__icon">
-      <span aria-hidden="true">{{ icon }}</span>
+    <div class="io-empty-state__icon" aria-hidden="true">
+      <!-- SVG slot takes priority; falls back to text icon prop -->
+      <slot name="icon">
+        <span>{{ icon }}</span>
+      </slot>
     </div>
     <p class="io-empty-state__title">{{ title }}</p>
     <p v-if="message" class="io-empty-state__message">{{ message }}</p>
