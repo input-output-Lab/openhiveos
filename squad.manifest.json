@@ -81,6 +81,14 @@
       "skills": ["frontend-test-coverage", "code-review", "bug-triage", "release-readiness"],
       "owns": ["test-coverage", "quality-gates", "release-sign-off", "regression-detection"],
       "works_with": ["murphy", "rocket", "elizabeth"]
+    },
+    {
+      "slug": "dashboard",
+      "name": "Dashboard",
+      "role": "System Principal",
+      "skills": [],
+      "owns": [],
+      "works_with": []
     }
   ]
 }
