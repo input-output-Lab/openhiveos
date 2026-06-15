@@ -1,6 +1,6 @@
 <template>
   <div>
-    <PageHeader title="Agent Registry" subtitle="Provisioned agents on this Squad instance." />
+    <PageHeader title="Agent Registry" subtitle="Provisioned agents on this Hive." />
 
     <!-- Ethos Seal gate banner -->
     <div

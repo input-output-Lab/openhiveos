@@ -1,6 +1,6 @@
 <template>
   <div class="space-y-5">
-    <PageHeader title="Inbox" subtitle="Open tasks assigned to agents on this Squad instance." />
+    <PageHeader title="Inbox" subtitle="Open tasks assigned to agents on this Hive." />
 
     <!-- Status filter strip ──────────────────────────────────────────────── -->
     <div class="flex gap-2 flex-wrap">

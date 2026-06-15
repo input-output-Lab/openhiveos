@@ -1,6 +1,6 @@
 <template>
   <div class="space-y-5">
-    <PageHeader title="SOPs Library" subtitle="Standard Operating Procedures available to agents on this Squad instance." />
+    <PageHeader title="SOPs Library" subtitle="Standard Operating Procedures available to agents on this Hive." />
 
     <!-- Category filter strip ───────────────────────────────────────────── -->
     <div class="flex gap-2 flex-wrap">
