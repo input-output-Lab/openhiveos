@@ -30,7 +30,7 @@
     <template v-else-if="agentData">
       <!-- Header -->
       <div class="flex items-start gap-4">
-        <div class="w-12 h-12 flex items-center justify-center flex-shrink-0 text-2xl" style="border-radius: var(--io-radius-full); background-color: var(--io-success-bg);" aria-hidden="true">◉</div>
+        <AgentAvatar :display-name="agentData.agent.display_name" size="md" />
         <div class="flex-1 min-w-0">
           <div class="flex items-center gap-3 flex-wrap">
             <h1 class="text-xl font-bold text-[#14201E] leading-tight">{{ agentData.agent.display_name }}</h1>
@@ -142,6 +142,7 @@ import type { AgentDetailResponse } from '../types/api'
 import BreadcrumbBar from '../components/BreadcrumbBar.vue'
 import DataBadge from '../components/DataBadge.vue'
 import ErrorState from '../components/ErrorState.vue'
+import AgentAvatar from '../components/AgentAvatar.vue'
 import ReasoningLedger from '../components/ReasoningLedger.vue'
 
 const route = useRoute()

@@ -13,6 +13,7 @@
  */
 
 import { z } from 'zod'
+import { pool } from '../../db/client.js'
 import type { IntegrationAdapter, SyncQueueRow, WebhookPayload } from '../adapter.js'
 import { syncToClickUp } from './sync.js'
 
@@ -62,6 +63,188 @@ export function validateClickUpConfig(): z.infer<typeof ClickUpConfigSchema> {
   }
 
   return parsed
+}
+
+/**
+ * Mapping of ClickUp list IDs to OpenHiveOS project IDs.
+ * Used to route incoming ClickUp tasks to the correct project.
+ */
+const LIST_ID_TO_PROJECT_MAPPING: Record<string, number> = {
+  '901327582339': 71, // Default ClickUp list → project 71 (IO FMS API)
+  // Add more mappings as needed for multi-workspace support
+}
+
+/**
+ * Handle taskCreated event: create a new OpenHiveOS task and link it
+ * Fetches full task details from ClickUp API to preserve title, description, and attachments
+ * Exported for testing purposes.
+ */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export async function handleClickUpTaskCreated(clickupTaskId: string, payload: WebhookPayload): Promise<void> {
+  console.log(`[clickup-adapter] Processing taskCreated: ${clickupTaskId}`)
+
+  // Check if already linked
+  const existingLink = await pool.query(
+    'SELECT id FROM external_task_links WHERE external_id = $1 AND provider = $2',
+    [clickupTaskId, 'clickup'],
+  )
+
+  if (existingLink.rows.length > 0) {
+    console.log(`[clickup-adapter] Task ${clickupTaskId} already linked`)
+    return
+  }
+
+  // Fetch full task details from ClickUp API
+  const botToken = process.env['CLICKUP_BOT_API_TOKEN']
+  if (!botToken) {
+    throw new Error('CLICKUP_BOT_API_TOKEN not configured')
+  }
+
+  let clickupTask: {
+    name: string
+    description: string | null
+    list?: { id: string }
+    attachments?: Array<{ id: string; title: string; url: string }>
+  }
+
+  try {
+    const response = await fetch(`https://api.clickup.com/api/v2/task/${clickupTaskId}`, {
+      method: 'GET',
+      headers: {
+        Authorization: botToken,
+        'Content-Type': 'application/json',
+      },
+    })
+
+    if (!response.ok) {
+      throw new Error(`ClickUp API error: ${String(response.status)} ${response.statusText}`)
+    }
+
+    clickupTask = (await response.json()) as typeof clickupTask
+  } catch (err) {
+    console.error(`[clickup-adapter] Failed to fetch ClickUp task ${clickupTaskId}:`, err)
+    throw err
+  }
+
+  // Build enriched description with attachments
+  let description = clickupTask.description || ''
+
+  if (clickupTask.attachments && clickupTask.attachments.length > 0) {
+    if (description) {
+      description += '\n\n---\n\n**Attachments:**\n'
+    } else {
+      description = '**Attachments:**\n'
+    }
+
+    description += clickupTask.attachments
+      .map((att) => `- [${att.title || att.id}](${att.url})`)
+      .join('\n')
+  }
+
+  // Determine project_id from ClickUp list_id
+  let projectId = 71 // default fallback
+  if (clickupTask.list?.id) {
+    const mappedProjectId = LIST_ID_TO_PROJECT_MAPPING[clickupTask.list.id]
+    if (mappedProjectId !== undefined) {
+      projectId = mappedProjectId
+    }
+  }
+
+  // Create task in OpenHiveOS with preserved title and enriched description
+  const taskResult = await pool.query<{ id: number }>(
+    `
+    INSERT INTO tasks (project_id, title, description, status)
+    VALUES ($1, $2, $3, $4)
+    RETURNING id
+    `,
+    [projectId, clickupTask.name, description, 'todo'],
+  )
+
+  if (!taskResult.rows[0]) {
+    throw new Error('Failed to create task in OpenHiveOS')
+  }
+
+  const taskId = taskResult.rows[0].id
+  if (!taskId) {
+    throw new Error('Failed to retrieve created task ID')
+  }
+
+  // Create external link
+  const botUserId = process.env['CLICKUP_BOT_USER_ID'] ?? ''
+  const clickUpUrl = `https://app.clickup.com/${botUserId}/v/t/${clickupTaskId}`
+
+  await pool.query(
+    `
+    INSERT INTO external_task_links (task_id, provider, external_id, external_url, sync_state, created_at)
+    VALUES ($1, $2, $3, $4, $5, NOW())
+    `,
+    [taskId, 'clickup', clickupTaskId, clickUpUrl, 'in_sync'],
+  )
+
+  console.log(
+    `[clickup-adapter] Created task ${String(taskId)} linked to ClickUp ${clickupTaskId}`,
+  )
+}
+
+/**
+ * Handle taskUpdated event: update the linked OpenHiveOS task
+ * Exported for testing purposes.
+ */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export async function handleClickUpTaskUpdated(clickupTaskId: string, payload: WebhookPayload): Promise<void> {
+  console.log(`[clickup-adapter] Processing taskUpdated: ${clickupTaskId}`)
+
+  // Find linked task
+  const linkResult = await pool.query<{ task_id: number }>(
+    'SELECT task_id FROM external_task_links WHERE external_id = $1 AND provider = $2',
+    [clickupTaskId, 'clickup'],
+  )
+
+  if (!linkResult.rows[0]) {
+    console.log(`[clickup-adapter] No linked task for ${clickupTaskId} — skipping update`)
+    return
+  }
+
+  const taskId = linkResult.rows[0].task_id
+  if (!taskId) {
+    throw new Error('Failed to retrieve task ID from link')
+  }
+
+  // TODO: Extract updates from history_items and apply to task
+  // For now, just mark as synced
+  await pool.query('UPDATE tasks SET updated_at = NOW() WHERE id = $1', [taskId])
+
+  console.log(`[clickup-adapter] Updated task ${String(taskId)}`)
+}
+
+/**
+ * Handle taskDeleted event: soft-delete the linked OpenHiveOS task
+ * Exported for testing purposes.
+ */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export async function handleClickUpTaskDeleted(clickupTaskId: string, payload: WebhookPayload): Promise<void> {
+  console.log(`[clickup-adapter] Processing taskDeleted: ${clickupTaskId}`)
+
+  // Find linked task
+  const linkResult = await pool.query<{ task_id: number }>(
+    'SELECT task_id FROM external_task_links WHERE external_id = $1 AND provider = $2',
+    [clickupTaskId, 'clickup'],
+  )
+
+  if (!linkResult.rows[0]) {
+    console.log(`[clickup-adapter] No linked task for ${clickupTaskId} — skipping delete`)
+    return
+  }
+
+  const taskId = linkResult.rows[0].task_id
+  if (!taskId) {
+    throw new Error('Failed to retrieve task ID from link')
+  }
+
+  // Soft-delete by marking status as pending-close
+  await pool.query('UPDATE tasks SET status = $1 WHERE id = $2', ['pending-close', taskId])
+
+  console.log(`[clickup-adapter] Marked task ${String(taskId)} as pending-close`)
 }
 
 /**

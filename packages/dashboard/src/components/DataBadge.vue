@@ -17,7 +17,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 
-type Variant = 'active' | 'inactive' | 'success' | 'neutral' | 'count' | 'info' | 'warning' | 'error' | 'muted'
+type Variant = 'active' | 'inactive' | 'success' | 'neutral' | 'count' | 'info' | 'warning' | 'error' | 'muted' | 'triage'
 
 const props = withDefaults(defineProps<{
   variant?: Variant
@@ -96,4 +96,11 @@ const resolvedVariant = computed(() => {
   color: var(--io-dark);
   border-color: var(--io-error-border);
 }
+
+.io-badge--triage {
+  background-color: color-mix(in srgb, var(--io-info) 10%, transparent);
+  color: color-mix(in srgb, var(--io-dark) 70%, transparent);
+  border-color: color-mix(in srgb, var(--io-info) 30%, transparent);
+}
+.io-badge--triage .io-badge__dot { background-color: var(--io-info); }
 </style>

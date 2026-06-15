@@ -1,6 +1,6 @@
 <template>
   <div class="space-y-5">
-    <PageHeader title="Projects" subtitle="Active and archived projects tracked on this Squad instance." />
+    <PageHeader title="Projects" subtitle="Active and archived projects tracked on this Hive." />
 
     <!-- Controls strip (status filters + sort + view toggle) ────────────────── -->
     <div class="flex items-center justify-between gap-3 flex-wrap">
