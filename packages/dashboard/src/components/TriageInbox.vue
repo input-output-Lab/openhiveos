@@ -64,11 +64,6 @@
           v-for="task in tasks"
           :key="task.id"
           class="triage-inbox__task-row"
-          role="button"
-          tabindex="0"
-          :aria-label="`Review task: ${task.title}`"
-          @click="$emit('task-selected', task.id)"
-          @keydown.enter.space="$emit('task-selected', task.id)"
         >
           <!-- Task content -->
           <div class="flex-1 min-w-0 py-3">
@@ -100,9 +95,34 @@
             </div>
           </div>
 
-          <!-- Created date -->
-          <div class="text-xs flex-shrink-0 ml-4" style="color: var(--io-body-secondary);">
-            {{ formatRelativeTime(task.created_at) }}
+          <!-- Created date + Actions -->
+          <div class="flex items-center gap-3 flex-shrink-0 ml-4">
+            <div class="text-xs" style="color: var(--io-body-secondary);">
+              {{ formatRelativeTime(task.created_at) }}
+            </div>
+
+            <!-- Promote button -->
+            <button
+              type="button"
+              class="triage-inbox__promote-btn"
+              :disabled="promotingTasks.has(task.id)"
+              :aria-busy="promotingTasks.has(task.id)"
+              :aria-label="`Promote task '${task.title}' from triage to todo`"
+              @click="handlePromote(task.id)"
+            >
+              <span v-if="promotingTasks.has(task.id)" aria-hidden="true">⟳</span>
+              <span v-else aria-hidden="true">→</span>
+            </button>
+
+            <!-- Task info link -->
+            <button
+              type="button"
+              class="triage-inbox__detail-btn"
+              :aria-label="`View task details: ${task.title}`"
+              @click="$emit('task-selected', task.id)"
+            >
+              <span aria-hidden="true">⋯</span>
+            </button>
           </div>
         </li>
       </TransitionGroup>
@@ -111,8 +131,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { formatRelativeTime } from '../utilities/formatTime'
+import { useTriagePromote } from '../composables/useTriagePromote'
 import type { TriageTask } from '../types/api'
 import ErrorState from './ErrorState.vue'
 
@@ -131,9 +152,41 @@ const props = withDefaults(defineProps<TriageInboxProps>(), {
 const emit = defineEmits<{
   'task-selected': [taskId: string]
   'external-link-clicked': [url: string]
+  'task-promoted': [taskId: string]
 }>()
 
+// ── Promote state ────────────────────────────────────────────────────────────
+const { promote } = useTriagePromote({
+  onSuccess: (task) => {
+    // Remove from promoting set when done
+    promotingTasks.delete(task.id)
+    // Emit promoted event so parent can remove from list
+    emit('task-promoted', task.id)
+  },
+  onError: (error) => {
+    // Find the task and remove from promoting set
+    const taskId = lastPromotedTaskId.value
+    if (taskId) promotingTasks.delete(taskId)
+
+    // Show error notification (parent can handle this)
+    console.error(`[TriageInbox] Promote error for task ${taskId}:`, error.message)
+  },
+})
+
+const promotingTasks = new Set<string>()
+const lastPromotedTaskId = ref<string>('')
+
 const count = computed(() => props.tasks.length)
+
+async function handlePromote(taskId: string) {
+  // Prevent duplicate promote attempts
+  if (promotingTasks.has(taskId)) return
+
+  promotingTasks.add(taskId)
+  lastPromotedTaskId.value = taskId
+
+  await promote(taskId)
+}
 
 function openExternal(url: string) {
   window.open(url, '_blank', 'noopener,noreferrer')
@@ -208,6 +261,55 @@ function openExternal(url: string) {
 .triage-inbox__provider-badge:focus {
   outline: 2px solid var(--io-primary);
   outline-offset: 1px;
+}
+
+/* Action buttons */
+.triage-inbox__promote-btn,
+.triage-inbox__detail-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 4px;
+  border: none;
+  background-color: transparent;
+  color: var(--io-body-secondary);
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  padding: 0;
+}
+
+.triage-inbox__promote-btn:hover:not(:disabled),
+.triage-inbox__detail-btn:hover {
+  background-color: color-mix(in srgb, var(--io-surface-border) 10%, transparent);
+  color: var(--io-dark);
+}
+
+.triage-inbox__promote-btn:focus,
+.triage-inbox__detail-btn:focus {
+  outline: 2px solid var(--io-primary);
+  outline-offset: 0;
+}
+
+.triage-inbox__promote-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.triage-inbox__promote-btn[aria-busy='true'] {
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 /* Mobile responsiveness */
