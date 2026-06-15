@@ -17,6 +17,7 @@ import { Router } from 'express'
 import { withReaderRole } from '../squad-api/db.js'
 import { getIntegrationsStatus } from '../services/integrations-status.js'
 import { getTriageInbox } from '../services/integrations-triage.js'
+import { promoteTriageTask } from '../services/integrations-promote.js'
 
 export const integrationsRouter = Router()
 
@@ -90,6 +91,82 @@ integrationsRouter.get('/triage', async (_req, res) => {
     console.error('[integrations/triage] Failed to fetch triage inbox:', message)
     res.status(500).json({
       error: 'Failed to retrieve triage inbox',
+    })
+  }
+})
+
+/**
+ * PATCH /api/integrations/triage/:id/promote
+ *
+ * Promote a triage task to 'todo' status.
+ *
+ * ARCH-024: Triage is an inbound-only status created by the ClickUp webhook
+ * processor. Operators use this endpoint to promote ingested external tasks
+ * into the active task backlog.
+ *
+ * Request: empty body (or optional { project_id?, assignee_agent_slug? } for future use)
+ *
+ * Response (200): the promoted task object
+ * - id, project_id, title, description, status='todo', assignee_agent_slug, etc.
+ *
+ * Error responses:
+ * - 404: task not found
+ * - 409: task is not in 'triage' status (already promoted)
+ * - 422: invalid task ID format
+ * - 500: internal error
+ *
+ * Auth: requires agent bearer token (no special role required — all authenticated agents
+ * may promote. Option A ruling per ARCH-024 DoR review 2026-06-14).
+ */
+integrationsRouter.patch('/triage/:id/promote', async (req, res) => {
+  try {
+    const taskId = parseInt(req.params.id, 10)
+
+    // Validate task ID is a positive integer
+    if (isNaN(taskId) || taskId <= 0) {
+      return res.status(422).json({
+        error: 'invalid_task_id',
+        message: `Task ID '${req.params.id}' is not a valid positive integer.`,
+      })
+    }
+
+    // Extract caller's agent slug from auth context (injected by authMiddleware)
+    const agentSlug = res.locals.agentSlug as string | undefined
+    if (!agentSlug) {
+      return res.status(401).json({
+        error: 'unauthorized',
+        message: 'Agent slug not found in request context.',
+      })
+    }
+
+    // Call the promote service
+    const result = await promoteTriageTask({
+      taskId,
+      agentSlug,
+      targetStatus: 'todo',
+    })
+
+    // Error object: disambiguate the response code
+    if ('error' in result) {
+      if (result.error === 'not_found') {
+        return res.status(404).json(result)
+      } else if (result.error === 'invalid_state_transition') {
+        return res.status(409).json(result)
+      } else if (result.error === 'invalid_target_status') {
+        return res.status(422).json(result)
+      } else {
+        return res.status(500).json(result)
+      }
+    }
+
+    // Success: return the promoted task
+    return res.status(200).json(result)
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'unknown error'
+    console.error('[integrations/promote] error:', message)
+    return res.status(500).json({
+      error: 'internal_error',
+      message: 'An error occurred while promoting the task.',
     })
   }
 })

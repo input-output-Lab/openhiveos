@@ -11,6 +11,9 @@ export const updateTaskSchema = z.object({
   description: z.string().max(5000).optional(),
   // ARCH-023: `pending-close` is the assignee terminal step. `done` requires
   // owner approval and is blocked on the assignee path by the M3 gate below.
+  // ARCH-024: `triage` is inbound-processor-only. Agents cannot set triage via
+  // update_task — only the inbound processor creates triage tasks. Promotion only
+  // path out of triage is PATCH /api/integrations/triage/:id/promote.
   status: z.enum(['todo', 'wip', 'review', 'done', 'rework', 'pending-close']).optional(),
   // unassign=true clears the assignee to NULL. Takes precedence over assignee_agent_slug.
   unassign: z.boolean().optional(),
@@ -41,6 +44,10 @@ export type UpdateTaskInput = z.infer<typeof updateTaskSchema>
 // Both gates must hold — neither alone is sufficient.
 export async function handleUpdateTask(input: UpdateTaskInput, agentSlug: string) {
   const parsed = updateTaskSchema.parse(input)
+
+  // ARCH-024: `triage` is NOT in the status enum (see schema above), so it is
+  // impossible for parsed.status to be 'triage'. Triage is inbound-processor-only.
+  // The only valid transition OUT of triage is PATCH /api/integrations/triage/:id/promote.
 
   // Owner-only fields: anything except status. If any are present, only the
   // project owner path is valid.
