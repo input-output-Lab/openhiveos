@@ -7,6 +7,26 @@ Version numbers follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.2.0] — 2026-06-17
+
+ClickUp inbound task sync via webhook. Agents can now receive real-time task creation, update, and deletion events from ClickUp.
+
+**Delivered by:** Murphy, Clarence, Cooper  
+**Branch:** `feat/clickup-task-creation` → `main`
+
+### Added — ClickUp Inbound Webhook Sync
+
+- **`handleClickUpTaskCreated`** — receives ClickUp task.created events, creates `external_task_links` entry, logs event to `inbound_events` table
+- **`handleClickUpTaskUpdated`** — receives task.updated events, syncs task metadata (title, status, assignee) back into OpenHiveOS
+- **`handleClickUpTaskDeleted`** — receives task.deleted events, marks task as archived in OpenHiveOS
+- **`POST /webhooks/clickup`** endpoint — validates ClickUp webhook signature (HMAC-SHA256), routes to appropriate handler
+- **`inbound_events` table** — audit log of all inbound ClickUp events: `event_type`, `provider`, `payload`, `processed_at`, `error_message`
+- **`external_task_links` table** — maps ClickUp task IDs to OpenHiveOS task IDs, preserves bidirectional link
+- **15 unit tests** covering all three handlers, signature validation, payload parsing, and error cases
+- **`POST /api/webhooks/configure`** endpoint — allows operators to register ClickUp webhook URL with ClickUp API
+
+---
+
 ## [0.1.0] — 2026-05-21
 
 First public release. The Cron Utilities registration layer completes the v0.1 feature set across four sprints.
