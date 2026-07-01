@@ -19,6 +19,10 @@ export const createTaskSchema = z.object({
   // If this field is ever surfaced in a UI, add domain allowlist validation.
   github_pr_url: z.string().url().optional(),
   notes: z.string().max(5000).optional(),
+  // Operator-defined classification metadata. Domain-agnostic JSONB — keys and
+  // values are set by the operator or agent. See docs/capabilities-reference.md
+  // for recommended (non-enforced) key conventions.
+  metadata: z.record(z.unknown()).optional(),
 })
 
 export type CreateTaskInput = z.infer<typeof createTaskSchema>
@@ -36,6 +40,7 @@ export async function handleCreateTask(input: CreateTaskInput, agentSlug: string
     ...(parsed.assignee_agent_slug !== undefined ? { assignee_agent_slug: parsed.assignee_agent_slug } : {}),
     ...(parsed.github_pr_url !== undefined ? { github_pr_url: parsed.github_pr_url } : {}),
     ...(parsed.notes !== undefined ? { notes: parsed.notes } : {}),
+    ...(parsed.metadata !== undefined ? { metadata: parsed.metadata } : {}),
   })
   if (!result.authorized) {
     return {

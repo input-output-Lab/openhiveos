@@ -109,6 +109,7 @@ export interface Task {
   assignee_agent_slug: string | null
   github_pr_url: string | null
   notes: string | null
+  metadata: Record<string, unknown>
   created_at: Date
   updated_at: Date
 }

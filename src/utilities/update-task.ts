@@ -27,6 +27,10 @@ export const updateTaskSchema = z.object({
   // with no domain restriction. Same risk acceptance as create-task.ts.
   github_pr_url: z.string().url().optional(),
   notes: z.string().max(5000).optional(),
+  // Operator-defined classification metadata. Owner-only field — assignees may
+  // not overwrite metadata (only status transitions are permitted on the assignee
+  // path). Domain-agnostic JSONB; replaces the full metadata object on update.
+  metadata: z.record(z.unknown()).optional(),
 })
 
 export type UpdateTaskInput = z.infer<typeof updateTaskSchema>
@@ -58,7 +62,8 @@ export async function handleUpdateTask(input: UpdateTaskInput, agentSlug: string
     parsed.unassign !== undefined ||
     parsed.assignee_agent_slug !== undefined ||
     parsed.github_pr_url !== undefined ||
-    parsed.notes !== undefined
+    parsed.notes !== undefined ||
+    parsed.metadata !== undefined
 
   const allowAssigneePath = !ownerOnlyFieldsPresent
 
@@ -86,6 +91,7 @@ export async function handleUpdateTask(input: UpdateTaskInput, agentSlug: string
     ...(parsed.assignee_agent_slug !== undefined ? { assignee_agent_slug: parsed.assignee_agent_slug } : {}),
     ...(parsed.github_pr_url !== undefined ? { github_pr_url: parsed.github_pr_url } : {}),
     ...(parsed.notes !== undefined ? { notes: parsed.notes } : {}),
+    ...(parsed.metadata !== undefined ? { metadata: parsed.metadata } : {}),
   })
   if (!result) {
     return {

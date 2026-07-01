@@ -105,6 +105,8 @@ export async function handleClickUpTaskCreated(clickupTaskId: string, payload: W
     description: string | null
     list?: { id: string }
     attachments?: Array<{ id: string; title: string; url: string }>
+    priority?: { priority: string } | null
+    tags?: Array<{ name: string }>
   }
 
   try {
@@ -150,14 +152,26 @@ export async function handleClickUpTaskCreated(clickupTaskId: string, payload: W
     }
   }
 
-  // Create task in OpenHiveOS with preserved title and enriched description
+  // Build metadata — preserve ClickUp classification data that would otherwise
+  // be discarded. source_* keys are reserved for integration adapters.
+  const taskMetadata: Record<string, unknown> = {
+    source_provider: 'clickup',
+  }
+  if (clickupTask.priority?.priority) {
+    taskMetadata['source_priority'] = clickupTask.priority.priority
+  }
+  if (clickupTask.tags && clickupTask.tags.length > 0) {
+    taskMetadata['source_tags'] = clickupTask.tags.map((t) => t.name)
+  }
+
+  // Create task in OpenHiveOS with preserved title, enriched description, and metadata
   const taskResult = await pool.query<{ id: number }>(
     `
-    INSERT INTO tasks (project_id, title, description, status)
-    VALUES ($1, $2, $3, $4)
+    INSERT INTO tasks (project_id, title, description, status, metadata)
+    VALUES ($1, $2, $3, $4, $5)
     RETURNING id
     `,
-    [projectId, clickupTask.name, description, 'todo'],
+    [projectId, clickupTask.name, description, 'todo', JSON.stringify(taskMetadata)],
   )
 
   if (!taskResult.rows[0]) {

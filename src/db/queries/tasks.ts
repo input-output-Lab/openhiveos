@@ -27,6 +27,7 @@ export async function createTask(params: {
   assignee_agent_slug?: string
   github_pr_url?: string
   notes?: string
+  metadata?: Record<string, unknown>
 }): Promise<{ authorized: false } | { authorized: true; task: Task }> {
   // Pre-flight: verify the requesting agent owns this project
   const ownership = await pool.query<{ id: number }>(
@@ -38,10 +39,10 @@ export async function createTask(params: {
   }
 
   const result = await pool.query<Task>(
-    `INSERT INTO tasks (project_id, title, description, assignee_agent_slug, github_pr_url, notes)
-     VALUES ($1, $2, $3, $4, $5, $6)
+    `INSERT INTO tasks (project_id, title, description, assignee_agent_slug, github_pr_url, notes, metadata)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
      RETURNING id, project_id, title, description, status, assignee_agent_slug,
-               github_pr_url, notes, created_at, updated_at`,
+               github_pr_url, notes, metadata, created_at, updated_at`,
     [
       params.project_id,
       params.title,
@@ -49,6 +50,7 @@ export async function createTask(params: {
       params.assignee_agent_slug ?? null,
       params.github_pr_url ?? null,
       params.notes ?? null,
+      JSON.stringify(params.metadata ?? {}),
     ],
   )
   const row = result.rows[0]
@@ -86,6 +88,7 @@ export async function updateTask(params: {
   assignee_agent_slug?: string
   github_pr_url?: string
   notes?: string
+  metadata?: Record<string, unknown>
   allowAssigneePath?: boolean
 }): Promise<Task | undefined> {
   const result = await pool.query<Task>(
@@ -105,14 +108,15 @@ export async function updateTask(params: {
            ELSE COALESCE($8, assignee_agent_slug)
          END,
          github_pr_url       = COALESCE($9, github_pr_url),
-         notes               = COALESCE($10, notes)
+         notes               = COALESCE($10, notes),
+         metadata            = COALESCE($12::jsonb, metadata)
      WHERE id = $1
        AND (
          project_id IN (SELECT id FROM projects WHERE owner_agent_slug = $2)
          OR ($11 AND assignee_agent_slug = $2)
        )
      RETURNING id, project_id, title, description, status, assignee_agent_slug,
-               github_pr_url, notes, created_at, updated_at`,
+               github_pr_url, notes, metadata, created_at, updated_at`,
     [
       params.task_id,
       params.owner_agent_slug,
@@ -131,6 +135,7 @@ export async function updateTask(params: {
       // assignee path. Any change to allowAssigneePath computation in the handler
       // is a Tier 3 security change and requires Locksmith review at PR-open.
       params.allowAssigneePath ?? false,
+      params.metadata !== undefined ? JSON.stringify(params.metadata) : null,
     ],
   )
   return result.rows[0]
@@ -146,6 +151,7 @@ export async function updateTask(params: {
 export async function queryTasks(
   filters: Partial<Record<TaskFilterKey, string | number>>,
   ownerAgentSlug: string,
+  metadata_filter?: Record<string, unknown>,
 ): Promise<Task[]> {
   const conditions: string[] = [
     // Implicit scope guard — always restricts to projects owned by the calling agent
@@ -161,9 +167,19 @@ export async function queryTasks(
     }
   }
 
+  // JSONB containment filter — each key/value pair is a separate @> condition.
+  // Pattern mirrors src/db/queries/memory.ts searchMemory() (SEC-25 compliant:
+  // no dynamic column names, only parameterised JSONB containment checks).
+  if (metadata_filter) {
+    for (const [key, value] of Object.entries(metadata_filter)) {
+      conditions.push(`metadata @> $${String(idx++)}::jsonb`)
+      values.push(JSON.stringify({ [key]: value }))
+    }
+  }
+
   const result = await pool.query<Task>(
     `SELECT id, project_id, title, description, status, assignee_agent_slug,
-            github_pr_url, notes, created_at, updated_at
+            github_pr_url, notes, metadata, created_at, updated_at
      FROM tasks
      WHERE ${conditions.join(' AND ')}
      ORDER BY created_at DESC`,

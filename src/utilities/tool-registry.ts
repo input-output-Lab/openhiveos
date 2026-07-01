@@ -38,6 +38,8 @@ export const REGISTERED_TOOL_NAMES = [
   'delete_cron',
   'query_crons',
   'update_cron',
+  // Pipeline Trigger (multi-agent-pipeline runner on port 3010)
+  'trigger_workflow',
   // Ethos Utilities (ARCH-018 S8-03)
   'get_company_ethos',
   // LLM Usage Reporting (ARCH-015)

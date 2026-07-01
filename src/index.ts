@@ -46,6 +46,9 @@ import { handleGetCompanyEthos, getCompanyEthosSchema } from './utilities/get-co
 import { handleReportUsage, reportUsageSchema } from './utilities/report-usage.js'
 import { CronWorker } from './workers/cron.worker.js'
 import { ToolDispatcher } from './workers/tool-dispatcher.js'
+import type { ToolHandler } from './workers/tool-dispatcher.js'
+import type { RegisteredToolName } from './utilities/tool-registry.js'
+import { triggerWorkflowHandler } from './workers/handlers/trigger-workflow.js'
 import { runSopIngest } from './sops/ingest.js'
 
 await connectDb()           // Step 2
@@ -262,6 +265,9 @@ await server.connect(transport) // Step 6
 // Dispatcher starts with an empty handler map — handlers are registered as
 // tool implementations are added. The architecture is in place; Scout's G2
 // tests will verify the poll loop and double-fire guard with a test dispatcher.
-const dispatcher = new ToolDispatcher(pool, new Map())
+const cronHandlers: Map<RegisteredToolName, ToolHandler> = new Map([
+  ['trigger_workflow', triggerWorkflowHandler],
+])
+const dispatcher = new ToolDispatcher(pool, cronHandlers)
 const worker = new CronWorker(pool, dispatcher)
 worker.start()

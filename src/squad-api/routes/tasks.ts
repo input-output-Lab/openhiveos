@@ -41,6 +41,7 @@ interface TaskDbRow {
   assignee_agent_slug: string | null
   github_pr_url: string | null
   notes: string | null
+  metadata: Record<string, unknown>
   created_at: string
   updated_at: string
 }
@@ -55,6 +56,7 @@ interface TaskRow {
   assignee_agent_slug: string | null
   github_pr_url: string | null
   notes: string | null
+  metadata: Record<string, unknown>
   created_at: string
   updated_at: string
 }
@@ -104,7 +106,23 @@ router.get('/', async (req, res) => {
     }
     projectId = parsed
   }
+  // ── Metadata filter ─────────────────────────────────────────────────────────────────────────────────
+  const rawMetadata = typeof req.query['metadata'] === 'string' ? req.query['metadata'] : undefined
+  let metadataFilter: Record<string, unknown> | undefined
 
+  if (rawMetadata !== undefined) {
+    try {
+      const parsed = JSON.parse(rawMetadata) as unknown
+      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+        res.status(400).json({ error: 'metadata must be a JSON object' })
+        return
+      }
+      metadataFilter = parsed as Record<string, unknown>
+    } catch {
+      res.status(400).json({ error: 'metadata must be valid JSON' })
+      return
+    }
+  }
   // ── Query ─────────────────────────────────────────────────────────────────
   // LEFT JOIN projects for project_slug — tasks cannot be deleted while
   // project exists (RESTRICT FK), but the slug is still nullable in the join
@@ -128,6 +146,13 @@ router.get('/', async (req, res) => {
       conditions.push(`t.project_id = $${String(params.length)}`)
     }
 
+    if (metadataFilter !== undefined) {
+      for (const [key, value] of Object.entries(metadataFilter)) {
+        params.push(JSON.stringify({ [key]: value }))
+        conditions.push(`t.metadata @> $${String(params.length)}::jsonb`)
+      }
+    }
+
     const whereClause = conditions.length > 0
       ? `WHERE ${conditions.join(' AND ')}`
       : ''
@@ -148,6 +173,7 @@ router.get('/', async (req, res) => {
              t.assignee_agent_slug,
              t.github_pr_url,
              t.notes,
+             t.metadata,
              t.created_at,
              t.updated_at
         FROM tasks t
@@ -175,6 +201,7 @@ router.get('/', async (req, res) => {
       assignee_agent_slug: row.assignee_agent_slug,
       github_pr_url: row.github_pr_url,
       notes: row.notes,
+      metadata: row.metadata,
       created_at: row.created_at,
       updated_at: row.updated_at,
     }))
@@ -222,6 +249,7 @@ router.get('/:id', async (req, res) => {
                 t.assignee_agent_slug,
                 t.github_pr_url,
                 t.notes,
+                t.metadata,
                 t.created_at,
                 t.updated_at
            FROM tasks t
@@ -249,6 +277,7 @@ router.get('/:id', async (req, res) => {
         assignee_agent_slug: row.assignee_agent_slug,
         github_pr_url: row.github_pr_url,
         notes: row.notes,
+        metadata: row.metadata,
         created_at: row.created_at,
         updated_at: row.updated_at,
       },
