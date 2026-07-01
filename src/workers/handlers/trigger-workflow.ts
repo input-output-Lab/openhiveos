@@ -22,6 +22,7 @@ export async function triggerWorkflowHandler(
   payload: Record<string, unknown> | null,
   _pool: Pool,
 ): Promise<void> {
+  void _pool
   const body = JSON.stringify(payload ?? {})
 
   const res = await fetch(RUNNER_URL, {
@@ -38,7 +39,7 @@ export async function triggerWorkflowHandler(
 
   if (!res.ok) {
     const text = await res.text().catch(() => '')
-    throw new Error(`[trigger-workflow] runner returned ${res.status}: ${text}`)
+    throw new Error(`[trigger-workflow] runner returned ${String(res.status)}: ${text}`)
   }
 
   const data = await res.json().catch(() => ({}))

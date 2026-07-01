@@ -26,6 +26,6 @@ export async function handleQueryTasks(input: QueryTasksInput, agentSlug: string
         : {}),
     },
     agentSlug,
-    parsed.metadata_filter as Record<string, unknown> | undefined,
+    parsed.metadata_filter,
   )
 }
