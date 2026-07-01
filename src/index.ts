@@ -5,6 +5,7 @@
 //   2.   Connect DB        (db/client  — throws on connection failure)
 //   3.   Check fingerprint (db/fingerprint — throws on schema drift)
 //   3.5  Check Ethos Seal  (db/ethos-seal — exits if seal absent or drifted, ARCH-013)
+//   3.6  Check One Seal    (db/one-seal — exits if protocols absent or drifted, ARCH-025)
 //   3.75 SOP ingest        (sops/ingest — upsert seeds/sops/**/*.md, ARCH-009 S8-02)
 //   4.   Resolve identity  (auth/identity — throws if AGENT_TOKEN unresolvable)
 //   5.   Start health      (health     — GET /health on HEALTH_PORT)
@@ -19,6 +20,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { connectDb, pool } from './db/client.js'
 import { checkFingerprint } from './db/fingerprint.js'
 import { checkEthosSeal } from './db/ethos-seal.js'
+import { checkOneSeal } from './db/one-seal.js'
 import { startHealthServer } from './health.js'
 import { resolveIdentity, extractGatewaySlug } from './auth/identity.js'
 import { handleGetDisposition, getDispositionSchema } from './primitives/get-disposition.js'
@@ -54,6 +56,7 @@ import { runSopIngest } from './sops/ingest.js'
 await connectDb()           // Step 2
 await checkFingerprint()    // Step 3
 await checkEthosSeal()      // Step 3.5 — exits on absent or drifted seal (ARCH-013 SEC-B8)
+await checkOneSeal()        // Step 3.6 — exits on absent or drifted One Seal (ARCH-025)
 await runSopIngest(join(process.cwd(), 'seeds', 'sops')) // Step 3.75 — ARCH-009 S8-02
 
 // Step 4 — identity resolution

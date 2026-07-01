@@ -41,6 +41,10 @@ const ConfigSchema = z.object({
   // ETHOS_SEAL_SECRET is NOT here — the MCP server never re-derives the HMAC.
   // It only compares the stored DB signature against the exported file signature.
   ETHOS_SEAL_PATH: z.string().min(1).default('./ethos.seal.json'),
+  // One Seal — ARCH-025 Step 3.6 boot check (checkOneSeal).
+  // ONE_SEAL_SECRET is NOT here — the MCP server never re-derives the HMAC.
+  // It only compares the stored DB signature against the exported file signature.
+  ONE_SEAL_PATH: z.string().min(1).default('./one.seal.json'),
 })
 
 export type Config = z.infer<typeof ConfigSchema>

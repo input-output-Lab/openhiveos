@@ -33,9 +33,9 @@
 import 'dotenv/config'
 
 import { createHash, createHmac } from 'node:crypto'
-import { writeFile, rename, mkdir } from 'node:fs/promises'
+import { writeFile, rename, mkdir, readFile } from 'node:fs/promises'
 import { createInterface } from 'node:readline'
-import { dirname, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 
 import { Pool } from 'pg'
 import type { PoolClient } from 'pg'
@@ -76,6 +76,35 @@ if (!ETHOS_SEAL_PATH) {
 // Narrow to string for downstream use after validation
 const sealSecret: string = ETHOS_SEAL_SECRET
 const sealPath: string = resolve(ETHOS_SEAL_PATH)
+
+// ---------------------------------------------------------------------------
+// One Seal env vars (ARCH-025)
+// ONE_SEAL_SECRET: separate 32-byte hex key — must NOT equal ETHOS_SEAL_SECRET (SEC-C1)
+// ONE_SEAL_PATH: file path for the exported one.seal.json (default: ./one.seal.json)
+// ---------------------------------------------------------------------------
+const ONE_SEAL_SECRET = process.env['ONE_SEAL_SECRET']
+const ONE_SEAL_PATH = process.env['ONE_SEAL_PATH']
+
+if (!ONE_SEAL_SECRET) {
+  console.error('[one-init] Error: ONE_SEAL_SECRET is required.')
+  console.error('[one-init] Generate: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"')
+  process.exit(1)
+}
+if (!/^[\da-f]{64}$/i.test(ONE_SEAL_SECRET)) {
+  console.error('[one-init] Error: ONE_SEAL_SECRET must be exactly 64 hex characters (32 bytes).')
+  process.exit(1)
+}
+if (ONE_SEAL_SECRET === ETHOS_SEAL_SECRET) {
+  console.error('[one-init] Error: ONE_SEAL_SECRET must not equal ETHOS_SEAL_SECRET (SEC-C1).')
+  process.exit(1)
+}
+if (!ONE_SEAL_PATH) {
+  console.error('[one-init] Error: ONE_SEAL_PATH is required.')
+  process.exit(1)
+}
+
+const oneSealSecret: string = ONE_SEAL_SECRET
+const oneSealPath: string = resolve(ONE_SEAL_PATH)
 
 // ---------------------------------------------------------------------------
 // Company identity env vars (ARCH-018 S8-03)
@@ -154,6 +183,21 @@ interface EthosSealRecord {
 }
 
 // ---------------------------------------------------------------------------
+// One Seal types (ARCH-025)
+// ---------------------------------------------------------------------------
+
+/** Canonical input for the One Seal HMAC. Keys sorted alphabetically. */
+interface OneSealInput {
+  agentOutline: string
+  spawnProtocol: string
+}
+
+interface OneSealRecord {
+  hmac: string
+  sealedAt: string
+}
+
+// ---------------------------------------------------------------------------
 // HMAC helpers
 // ---------------------------------------------------------------------------
 
@@ -195,6 +239,11 @@ function computePayloadHash(payload: EthosSealPayload): string {
   return createHash('sha256').update(canonicalise(payload)).digest('hex')
 }
 
+/** HMAC-SHA256(stableStringify(input), ONE_SEAL_SECRET) — stored in one_seals.signature. */
+function computeOneSealHmac(input: OneSealInput): string {
+  return createHmac('sha256', oneSealSecret).update(stableStringify(input)).digest('hex')
+}
+
 // ---------------------------------------------------------------------------
 // Atomic file export
 // Writes to a temp file then renames — rename is atomic on POSIX systems.
@@ -208,6 +257,70 @@ async function exportSealFile(record: EthosSealRecord): Promise<void> {
   await writeFile(tmp, JSON.stringify(record, null, 2), { encoding: 'utf-8', mode: 0o600 })
   await rename(tmp, sealPath)
   console.log(`[one-init] Seal file written to ${sealPath}`)
+}
+
+async function exportOneSealFile(record: OneSealRecord): Promise<void> {
+  const dir = dirname(oneSealPath)
+  await mkdir(dir, { recursive: true })
+
+  const tmp = `${oneSealPath}.tmp`
+  await writeFile(tmp, JSON.stringify(record, null, 2), { encoding: 'utf-8', mode: 0o600 })
+  await rename(tmp, oneSealPath)
+  console.log(`[one-init] One Seal file written to ${oneSealPath}`)
+}
+
+// ---------------------------------------------------------------------------
+// One Seal database operations (ARCH-025)
+// Schema: 021_one_seal.sql — UNIQUE partial index (WHERE is_active = TRUE)
+// ---------------------------------------------------------------------------
+
+async function insertOneSeal(client: PoolClient, hmac: string): Promise<void> {
+  await client.query(
+    `INSERT INTO one_seals (signature, sealed_at, sealed_by, is_active)
+     VALUES ($1, NOW(), 'cli:init', TRUE)`,
+    [hmac],
+  )
+}
+
+async function reviseOneSeal(client: PoolClient, hmac: string): Promise<void> {
+  await client.query(`UPDATE one_seals SET is_active = FALSE WHERE is_active = TRUE`)
+  await client.query(
+    `INSERT INTO one_seals (signature, sealed_at, sealed_by, is_active)
+     VALUES ($1, NOW(), 'cli:revise', TRUE)`,
+    [hmac],
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Read One SOP seed files for HMAC computation
+// Paths relative to project root (process.cwd() when running via npm/tsx)
+// ---------------------------------------------------------------------------
+async function readOneSopFiles(): Promise<OneSealInput> {
+  const root = process.cwd()
+  const agentOutlinePath = join(root, 'seeds', 'sops', 'core', 'architecture', 'one-agent-outline.md')
+  const spawnProtocolPath = join(root, 'seeds', 'sops', 'core', 'architecture', 'one-spawn-protocol.md')
+
+  let agentOutline: string
+  let spawnProtocol: string
+
+  try {
+    agentOutline = await readFile(agentOutlinePath, 'utf-8')
+  } catch {
+    console.error('[one-init] Error: One SOP file not found: %s', agentOutlinePath)
+    console.error('[one-init] Ensure seeds/sops/core/architecture/one-agent-outline.md exists before running one-init.')
+    process.exit(1)
+  }
+
+  try {
+    spawnProtocol = await readFile(spawnProtocolPath, 'utf-8')
+  } catch {
+    console.error('[one-init] Error: One SOP file not found: %s', spawnProtocolPath)
+    console.error('[one-init] Ensure seeds/sops/core/architecture/one-spawn-protocol.md exists before running one-init.')
+    process.exit(1)
+  }
+
+  // Keys in alphabetical order (stableStringify will sort, but explicit here for clarity)
+  return { agentOutline, spawnProtocol }
 }
 
 // ---------------------------------------------------------------------------
@@ -386,6 +499,39 @@ async function main(): Promise<void> {
     process.exit(1)
   } finally {
     client.release()
+  }
+
+  // ---------------------------------------------------------------------------
+  // One Seal initialisation (ARCH-025) — runs after Ethos Seal, same CLI run.
+  // Reads the two One SOP seed files, computes HMAC, stores in one_seals,
+  // and exports one.seal.json. Uses a separate DB client (separate connection).
+  // ---------------------------------------------------------------------------
+  console.log('')
+  console.log('[one-init] Initialising One Seal (ARCH-025)...')
+
+  const sopInput = await readOneSopFiles()
+  const oneSealHmac = computeOneSealHmac(sopInput)
+  const oneSealRecord: OneSealRecord = { hmac: oneSealHmac, sealedAt: new Date().toISOString() }
+
+  const oneClient = await db.connect()
+  try {
+    if (isRevise) {
+      await withSerializableRetry(oneClient, (c) => reviseOneSeal(c, oneSealHmac))
+      console.log('[one-init] One Seal revised successfully.')
+    } else {
+      await oneClient.query('BEGIN')
+      await insertOneSeal(oneClient, oneSealHmac)
+      await oneClient.query('COMMIT')
+      console.log('[one-init] One Seal initialised successfully.')
+    }
+
+    await exportOneSealFile(oneSealRecord)
+  } catch (err) {
+    await oneClient.query('ROLLBACK').catch(() => undefined)
+    console.error('[one-init] One Seal error:', err instanceof Error ? err.message : String(err))
+    process.exit(1)
+  } finally {
+    oneClient.release()
   }
 }
 
