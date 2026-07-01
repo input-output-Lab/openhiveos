@@ -31,7 +31,7 @@ module.exports = {
       script: 'dist/squad-api/index.js',
       instances: 1,
       exec_mode: 'fork',
-      cwd: '/Users/richo/Sites/inputoutputco/OpenHiveOS',
+      cwd: '/Users/richo/Projects/OpenHiveOS',
       interpreter: 'node',
 
       // Environment variables
@@ -50,8 +50,8 @@ module.exports = {
       min_uptime: '10s',
 
       // Logging
-      output: '/Users/richo/Sites/inputoutputco/OpenHiveOS/logs/squad-api.log',
-      error: '/Users/richo/Sites/inputoutputco/OpenHiveOS/logs/squad-api-error.log',
+      output: '/Users/richo/Projects/OpenHiveOS/logs/squad-api.log',
+      error: '/Users/richo/Projects/OpenHiveOS/logs/squad-api-error.log',
       log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
 
       // Health check
@@ -66,7 +66,7 @@ module.exports = {
       script: 'packages/mcp-gateway/dist/index.js',
       instances: 1,
       exec_mode: 'fork',
-      cwd: '/Users/richo/Sites/inputoutputco/OpenHiveOS',
+      cwd: '/Users/richo/Projects/OpenHiveOS',
       interpreter: 'node',
 
       // Environment variables
@@ -92,12 +92,42 @@ module.exports = {
       min_uptime: '10s',
 
       // Logging
-      output: '/Users/richo/Sites/inputoutputco/OpenHiveOS/logs/mcp-gateway.log',
-      error: '/Users/richo/Sites/inputoutputco/OpenHiveOS/logs/mcp-gateway-error.log',
+      output: '/Users/richo/Projects/OpenHiveOS/logs/mcp-gateway.log',
+      error: '/Users/richo/Projects/OpenHiveOS/logs/mcp-gateway-error.log',
       log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
 
       // Health check
       max_memory_restart: '500M',
+    },
+
+    {
+      // -----------------------------------------------------------------------
+      // Squad Runner — multi-agent pipeline HTTP server (port 3010)
+      // Receives workflow triggers from OpenHive crons via POST /run.
+      // -----------------------------------------------------------------------
+      name: 'squad-runner',
+      script: '/Users/richo/Projects/multi-agent-pipeline/env/bin/python3',
+      args: 'runner.py',
+      cwd: '/Users/richo/Projects/multi-agent-pipeline',
+      instances: 1,
+      exec_mode: 'fork',
+
+      // Graceful restart
+      wait_ready: true,
+      listen_timeout: 5000,
+
+      // Auto-restart on crash
+      autorestart: true,
+      max_restarts: 10,
+      min_uptime: '10s',
+
+      // Logging
+      output: '/Users/richo/Projects/multi-agent-pipeline/logs/runner.log',
+      error: '/Users/richo/Projects/multi-agent-pipeline/logs/runner-error.log',
+      log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
+
+      // Health check
+      max_memory_restart: '1G',
     },
   ],
 
