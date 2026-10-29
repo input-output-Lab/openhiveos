@@ -13,6 +13,7 @@
 //
 // The MCP server never accepts connections unless all prior steps succeed.
 // agentSlug is resolved at Step 4 and closed over in all handler registrations.
+import 'dotenv/config'
 import { join } from 'node:path'
 import { config } from './config.js' // Step 1: validate env immediately — throws on missing vars
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
