@@ -28,6 +28,8 @@ vi.mock('../../src/db/queries/tasks.js', () => ({
   updateTask: vi.fn(),
   queryTasks: vi.fn(),
   advanceSprint: vi.fn(),
+  // S17-BE-01 (#2555): transition gate fetches the task before mutating
+  getTaskForActor: vi.fn(),
   ALLOWED_TASK_FILTERS: ['project_id', 'status', 'assignee_agent_slug'],
 }))
 
@@ -57,6 +59,9 @@ vi.mock('../../src/db/queries/sprints.js', () => ({
 
 vi.mock('../../src/db/client.js', () => ({
   pool: { query: vi.fn() },
+  // S17-BE-01 (#2555): actor-attribution wrapper — pass-through in tests, so
+  // the handler's updateTask mock still receives its args (with a fake tx client).
+  withActor: vi.fn(async (_actor: string, fn: (tx: unknown) => Promise<unknown>) => fn({ __fakeTx: true })),
 }))
 
 vi.mock('../../src/squad/manifest.js', () => ({
@@ -94,6 +99,7 @@ import { handleQueryTasks } from '../../src/utilities/query-tasks.js'
 import { handleUpdateCron, validatePayload } from '../../src/utilities/update-cron.js'
 import { handleUpdateProject, updateProjectSchema } from '../../src/utilities/update-project.js'
 import { handleUpdateTask } from '../../src/utilities/update-task.js'
+import { resolveApprover, assertTransition, type TransitionContext } from '../../src/utilities/task-transitions.js'
 
 import * as tasksDb from '../../src/db/queries/tasks.js'
 import * as cronsDb from '../../src/db/queries/crons.js'
@@ -107,6 +113,7 @@ const mockAdvanceSprint = vi.mocked(tasksDb.advanceSprint)
 const mockCreateTask = vi.mocked(tasksDb.createTask)
 const mockUpdateTask = vi.mocked(tasksDb.updateTask)
 const mockQueryTasks = vi.mocked(tasksDb.queryTasks)
+const mockGetTaskForActor = vi.mocked(tasksDb.getTaskForActor)
 
 const mockCreateCron = vi.mocked(cronsDb.createCron)
 const mockQueryCrons = vi.mocked(cronsDb.queryCrons)
@@ -1544,8 +1551,21 @@ describe('TC-U12: update-task', () => {
     notes: null,
   }
 
+  // S17-BE-01 (#2555): the transition gate fetches the task before mutating.
+  // Default: caller owns the project, task is todo, assigned to the caller —
+  // so any single-step status transition the old tests used stays valid.
+  // Individual tests override with mockGetTaskForActor.mockResolvedValueOnce.
   beforeEach(() => {
     vi.clearAllMocks()
+    mockGetTaskForActor.mockResolvedValue({
+      id: 42,
+      status: 'todo',
+      assignee_agent_slug: AGENT,
+      reviewer_agent_slug: null,
+      project_id: 1,
+      project_owner_agent_slug: AGENT,
+      metadata: {},
+    })
   })
 
   // Happy paths — owner updating all field types (6 tests)
@@ -1593,24 +1613,41 @@ describe('TC-U12: update-task', () => {
     expect(result.github_pr_url).toBe(url)
   })
 
-  it('TC-U12-6: owner updates multiple fields at once', async () => {
-    mockUpdateTask.mockResolvedValueOnce({ ...stubTaskForUpdate, title: 'Updated', status: 'review' })
+  it('TC-U12-6 (S17-BE-01): owner updates multiple non-status fields at once', async () => {
+    mockUpdateTask.mockResolvedValueOnce({
+      ...stubTaskForUpdate,
+      title: 'Updated',
+      github_pr_url: 'https://github.com/o/r/p/2',
+    })
 
-    const result = await handleUpdateTask({ task_id: 42, title: 'Updated', status: 'review' }, AGENT)
+    const result = await handleUpdateTask(
+      { task_id: 42, title: 'Updated', github_pr_url: 'https://github.com/o/r/p/2' },
+      AGENT,
+    )
 
     expect(result.title).toBe('Updated')
-    expect(result.status).toBe('review')
+    expect(result.github_pr_url).toBe('https://github.com/o/r/p/2')
   })
 
   // Model C field gate: assignee path (3 tests)
-  it('TC-U12-7: assignee updates status to pending-close — sets allowAssigneePath=true', async () => {
-    mockUpdateTask.mockResolvedValueOnce({ ...stubTaskForUpdate, status: 'pending-close' })
+  it('TC-U12-7 (S17-BE-01): assignee cannot submit pending-close — reviewer gates review', async () => {
+    // Ruling P4: assignee's terminal submission is review; pending-close is the
+    // REVIEWER's action. The default beforeEach mock has caller as owner AND
+    // assignee — override so the caller is assignee-only.
+    mockGetTaskForActor.mockResolvedValueOnce({
+      id: 42,
+      status: 'review',
+      assignee_agent_slug: AGENT,
+      reviewer_agent_slug: 'scout',
+      project_id: 1,
+      project_owner_agent_slug: 'elizabeth',
+      metadata: {},
+    })
 
-    await handleUpdateTask({ task_id: 42, status: 'pending-close' }, AGENT)
+    const result = await handleUpdateTask({ task_id: 42, status: 'pending-close' }, AGENT)
 
-    expect(mockUpdateTask).toHaveBeenCalledWith(
-      expect.objectContaining({ allowAssigneePath: true }),
-    )
+    expect(result).toHaveProperty('error', 'invalid_transition')
+    expect(mockUpdateTask).not.toHaveBeenCalled()
   })
 
   it('TC-U12-8: owner-only fields present — sets allowAssigneePath=false', async () => {
@@ -1634,20 +1671,58 @@ describe('TC-U12: update-task', () => {
   })
 
   // Authorization & DB errors (2 tests)
-  it('TC-U12-10: returns error when task not found or unauthorized (DB null return)', async () => {
-    mockUpdateTask.mockResolvedValueOnce(null)
+  it('TC-U12-10 (S17-BE-01): transition gate rejects with invalid_transition when gate fails', async () => {
+    // Gate rejects BEFORE the DB call: assignee tries review→done (P1).
+    mockGetTaskForActor.mockResolvedValueOnce({
+      id: 42,
+      status: 'review',
+      assignee_agent_slug: AGENT,
+      reviewer_agent_slug: 'scout',
+      project_id: 1,
+      project_owner_agent_slug: 'elizabeth',
+      metadata: {},
+    })
 
-    const result = await handleUpdateTask({ task_id: 42, status: 'pending-close' }, AGENT)
+    const result = await handleUpdateTask({ task_id: 42, status: 'done' }, AGENT)
+
+    // The matrix rejects: caller (assignee+owner in default mock) is NOT the
+    // approver (elizabeth for this project-owner shape).
+    expect(result).toHaveProperty('error', 'invalid_transition')
+    expect(mockUpdateTask).not.toHaveBeenCalled()
+  })
+
+  it('TC-U12-10c (S17-BE-01): matrix rejection surfaces invalid_transition (owner path)', async () => {
+    // Caller owns the project but is NOT the assignee or approver — the matrix
+    // (not M3) produces the rejection.
+    mockGetTaskForActor.mockResolvedValueOnce({
+      id: 42,
+      status: 'review',
+      assignee_agent_slug: 'other-agent',
+      reviewer_agent_slug: 'scout',
+      project_id: 1,
+      project_owner_agent_slug: AGENT,
+      metadata: {},
+    })
+
+    const result = await handleUpdateTask({ task_id: 42, status: 'done' }, AGENT)
+
+    expect(result).toHaveProperty('error', 'invalid_transition')
+    expect(mockUpdateTask).not.toHaveBeenCalled()
+  })
+
+  it('TC-U12-10b: DB null return still yields not_found_or_unauthorized (non-status path)', async () => {
+    mockUpdateTask.mockResolvedValueOnce(undefined)
+
+    const result = await handleUpdateTask({ task_id: 42, title: 'X' }, AGENT)
 
     expect(result).toHaveProperty('error', 'not_found_or_unauthorized')
   })
 
   it('TC-U12-11: handles DB error from query layer', async () => {
-    // Use a non-M3-intercepted status so the call reaches the DB layer
     mockUpdateTask.mockRejectedValueOnce(new Error('Connection timeout'))
 
     await expect(
-      handleUpdateTask({ task_id: 42, status: 'pending-close' }, AGENT),
+      handleUpdateTask({ task_id: 42, title: 'X' }, AGENT),
     ).rejects.toThrow('Connection timeout')
   })
 
@@ -1709,20 +1784,57 @@ describe('TC-U12: update-task', () => {
   })
 
   // Edge cases & boundaries (2 tests)
-  it('TC-U12-21: accepts all valid status values', async () => {
-    // Assignee-path statuses (allowAssigneePath=true — no owner-only fields)
-    const assigneeStatuses = ['todo', 'wip', 'review', 'rework', 'pending-close'] as const
-    for (const status of assigneeStatuses) {
-      mockUpdateTask.mockResolvedValueOnce({ ...stubTaskForUpdate, status })
-      const result = await handleUpdateTask({ task_id: 42, status }, AGENT)
-      expect(result.status).toBe(status)
-    }
+  it('TC-U12-21 (S17-BE-01): walks the legal lifecycle todo→wip→review', async () => {
+    // Assignee/owner legal steps from the default fetch (status: todo, caller
+    // = owner + assignee). todo→wip, then wip→review.
+    mockUpdateTask.mockResolvedValueOnce({ ...stubTaskForUpdate, status: 'wip' })
+    const r1 = await handleUpdateTask({ task_id: 42, status: 'wip' }, AGENT)
+    expect(r1.status).toBe('wip')
 
-    // Owner path: `done` requires at least one owner-only field (e.g. notes)
-    // so that allowAssigneePath=false and M3 does not fire.
-    mockUpdateTask.mockResolvedValueOnce({ ...stubTaskForUpdate, status: 'done' })
-    const ownerClose = await handleUpdateTask({ task_id: 42, status: 'done', notes: 'Approved.' }, AGENT)
-    expect(ownerClose.status).toBe('done')
+    mockGetTaskForActor.mockResolvedValueOnce({
+      id: 42, status: 'wip', assignee_agent_slug: AGENT, reviewer_agent_slug: null,
+      project_id: 1, project_owner_agent_slug: AGENT, metadata: {},
+    })
+    mockUpdateTask.mockResolvedValueOnce({ ...stubTaskForUpdate, status: 'review' })
+    const r2 = await handleUpdateTask({ task_id: 42, status: 'review' }, AGENT)
+    expect(r2.status).toBe('review')
+  })
+
+  it('TC-U12-21b (S17-BE-01): reviewer submits pending-close, approver confirms done', async () => {
+    // reviewer (scout, explicit) gates review → pending-close
+    mockGetTaskForActor.mockResolvedValueOnce({
+      id: 42, status: 'review', assignee_agent_slug: AGENT, reviewer_agent_slug: 'scout',
+      project_id: 1, project_owner_agent_slug: AGENT, metadata: {},
+    })
+    mockUpdateTask.mockResolvedValueOnce({ ...stubTaskForUpdate, status: 'pending-close' })
+    const r1 = await handleUpdateTask({ task_id: 42, status: 'pending-close' }, 'scout')
+    expect(r1.status).toBe('pending-close')
+
+    // approver step: for a test-agent-owned task the approver is ELIZABETH
+    // (resolveApprover: elizabeth unless task owned by elizabeth → nova).
+    // Handler-level proof: test-agent (the owner, not the approver) calling
+    // done is rejected with invalid_transition naming elizabeth.
+    mockGetTaskForActor.mockResolvedValueOnce({
+      id: 42, status: 'pending-close', assignee_agent_slug: AGENT, reviewer_agent_slug: 'scout',
+      project_id: 1, project_owner_agent_slug: AGENT, metadata: {},
+    })
+    const r2 = await handleUpdateTask({ task_id: 42, status: 'done', notes: 'Approved.' }, AGENT)
+    expect(r2).toHaveProperty('error', 'invalid_transition')
+    if ('message' in r2) expect(r2.message).toContain('elizabeth')
+
+    // Matrix decision verified directly: elizabeth WOULD pass.
+    const ctx2: TransitionContext = {
+      task: {
+        status: 'pending-close',
+        assignee_agent_slug: AGENT,
+        reviewer_agent_slug: 'scout',
+        project_owner_agent_slug: AGENT,
+        metadata: {},
+      },
+      callerAgentSlug: 'elizabeth',
+    }
+    expect(resolveApprover(ctx2)).toBe('elizabeth')
+    expect(assertTransition(ctx2, 'done').ok).toBe(true)
   })
 
   it('TC-U12-22: title at exactly 500 chars (boundary) accepted', async () => {
@@ -1735,12 +1847,14 @@ describe('TC-U12: update-task', () => {
   })
 
   // M3 gate (ARCH-023) — 2 tests required by Locksmith
-  it('TC-U12-M3-1: assignee direct done write is blocked (M3 gate)', async () => {
+  it('TC-U12-M3-1 (S17-BE-01): assignee direct done write is blocked (matrix P1)', async () => {
     // When only `status` is present, allowAssigneePath=true. `done` on the
-    // assignee path must be rejected before the DB is called.
+    // assignee path must be rejected before the DB is called. The matrix
+    // subsumes the old M3 opaque-404: rejection is now invalid_transition
+    // with a role-naming reason (more auditable, equally blocking).
     const result = await handleUpdateTask({ task_id: 42, status: 'done' }, AGENT)
 
-    expect(result).toHaveProperty('error', 'not_found_or_unauthorized')
+    expect(result).toHaveProperty('error', 'invalid_transition')
     expect(mockUpdateTask).not.toHaveBeenCalled()
   })
 
@@ -1753,7 +1867,7 @@ describe('TC-U12: update-task', () => {
     // Positive coverage (pending-close IS allowed on assignee path) lives in TC-U12-7.
     const result = await handleUpdateTask({ task_id: 42, status: 'done' }, AGENT)
 
-    expect(result).toHaveProperty('error', 'not_found_or_unauthorized')
+    expect(result).toHaveProperty('error', 'invalid_transition')
     expect(mockUpdateTask).not.toHaveBeenCalled()
   })
 })

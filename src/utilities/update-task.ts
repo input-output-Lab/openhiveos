@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { TASK_STATUSES } from '../types.js'
 import { updateTask, getTaskForActor } from '../db/queries/tasks.js'
+import { withActor } from '../db/client.js'
 import { isValidAgentSlug } from '../squad/manifest.js'
 import { assertTransition } from './task-transitions.js'
 
@@ -103,15 +104,13 @@ export async function handleUpdateTask(input: UpdateTaskInput, agentSlug: string
       }
     }
 
-    // M3 gate (ARCH-023) is subsumed by the matrix: 'done' from any state is
-    // only permitted as approver/system from pending-close — an assignee can
-    // never satisfy it. Kept as an explicit early guard for defense-in-depth.
-    if (allowAssigneePath && parsed.status === 'done') {
-      return {
-        error: 'not_found_or_unauthorized',
-        message: 'Task not found or you are not authorized to update it.',
-      }
-    }
+    // M3 gate (ARCH-023) is FULLY SUBSUMED by the transition matrix (S17-BE-01):
+    // 'done' is only reachable as approver/system from pending-close, and
+    // assertTransition resolves the caller's real role (owner of the project may
+    // approve only if elizabeth/nova rule applies). The old allowAssigneePath-
+    // based early guard misfired for owners making bare status requests —
+    // allowAssigneePath is a FIELD gate, not a role determination. The matrix
+    // is the single enforcement point for status transitions.
 
     const verdict = assertTransition(
       {
@@ -141,11 +140,18 @@ export async function handleUpdateTask(input: UpdateTaskInput, agentSlug: string
     }
   }
 
-  const result = await updateTask({
-    task_id: parsed.task_id,
-    owner_agent_slug: agentSlug,
-    allowAssigneePath,
-    ...(expectedFromStatus !== undefined ? { expectedFromStatus } : {}),
+  // S17-BE-01 (#2555, P5): every write runs inside withActor so migration
+  // 024's audit triggers attribute task_status_history + audit_log rows to
+  // the real caller. The transaction client is threaded into updateTask —
+  // SET LOCAL is connection-scoped, so the UPDATE must run on the SAME
+  // connection where hive.actor was set (E2E-caught bug otherwise).
+  const result = await withActor(agentSlug, (tx) =>
+    updateTask({
+      client: tx,
+      task_id: parsed.task_id,
+      owner_agent_slug: agentSlug,
+      allowAssigneePath,
+      ...(expectedFromStatus !== undefined ? { expectedFromStatus } : {}),
     ...(parsed.project_id !== undefined ? { project_id: parsed.project_id } : {}),
     ...(parsed.title !== undefined ? { title: parsed.title } : {}),
     ...(parsed.description !== undefined ? { description: parsed.description } : {}),
@@ -159,7 +165,8 @@ export async function handleUpdateTask(input: UpdateTaskInput, agentSlug: string
     ...(parsed.billing_low !== undefined ? { billing_low: parsed.billing_low } : {}),
     ...(parsed.billing_high !== undefined ? { billing_high: parsed.billing_high } : {}),
     ...(parsed.estimate_confidence !== undefined ? { estimate_confidence: parsed.estimate_confidence } : {}),
-  })
+    })
+  )
   if (!result) {
     return {
       error: 'not_found_or_unauthorized',

@@ -1,4 +1,5 @@
 import { pool } from '../client.js'
+import type { PoolClient } from 'pg'
 import type { Task, Sprint, TaskStatus } from '../../types.js'
 
 // ---------------------------------------------------------------------------
@@ -175,8 +176,14 @@ export async function updateTask(params: {
   billing_high?: number
   estimate_confidence?: 'low' | 'medium' | 'high'
   allowAssigneePath?: boolean
+  // S17-BE-01 (#2555): when called inside withActor(), pass the transaction
+  // client here so the query executes on the connection where hive.actor is
+  // SET LOCAL'd. SET LOCAL is connection-scoped — using pool.query() here
+  // would run on a different connection and audit rows would log 'system:sql'.
+  client?: PoolClient
 }): Promise<Task | undefined> {
-  const result = await pool.query<Task>(
+  const db = params.client ?? pool
+  const result = await db.query<Task>(
     `UPDATE tasks
      SET project_id          = CASE
            WHEN $3::INTEGER IS NOT NULL AND EXISTS(
