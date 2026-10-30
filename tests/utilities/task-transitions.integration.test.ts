@@ -21,9 +21,12 @@ const REVIEWER = 'scout'          // must exist in agents (seeded)
 let projectId: number
 let taskId: number
 
-async function seed(): Promise<void> {
+async function seed(domain: string = 'qa'): Promise<void> {
   // project created directly via SQL (owner = elizabeth), then the task via
   // the real handleCreateTask path — exercising the production create chain.
+  // domain param: describe 2 uses 'docs' → clarence so the owner
+  // reassign-reviewer regression test exercises a REAL reassignment (qa would
+  // pre-stamp scout and make the test vacuous — Locksmith BLOCK, memory 3308).
   const r = await pool.query<{ id: number }>(
     `INSERT INTO projects (slug, name, owner_agent_slug)
      VALUES ($1, $2, $3)
@@ -42,19 +45,19 @@ async function seed(): Promise<void> {
       billing_high: 3,
       estimate_confidence: 'medium',
       assignee_agent_slug: ASSIGNEE,
-      metadata: { domain: 'qa' },
+      metadata: { domain },
     },
     OWNER,
   )
-  // reviewer stamped at create via resolveReviewer (qa→scout) — verified below
-  // in the P4 walk where scout gates review → pending-close.
+  // reviewer stamped at create via resolveReviewer (qa→scout, docs→clarence) —
+  // verified below in the P4 walk where scout gates review → pending-close.
   if ('error' in created) throw new Error(`seed create failed: ${JSON.stringify(created)}`)
   taskId = Number((created as { id: number }).id) // BIGSERIAL returns as string
 }
 
 d('S17-BE-01 integration: full transition lifecycle (real DB)', () => {
   beforeAll(async () => {
-    await seed()
+    await seed('qa')
   })
 
   afterAll(async () => {
@@ -96,8 +99,10 @@ d('S17-BE-01 integration: full transition lifecycle (real DB)', () => {
   it('P1: nova (approver for elizabeth-owned tasks) confirms pending-close → done', async () => {
     // D5 ruling: elizabeth approves done — except tasks owned by elizabeth,
     // where nova approves. This project is elizabeth-owned → approver = nova.
+    // NOTE: approver is status-ONLY (smuggling gate — notes are reviewer-only
+    // per the Locksmith BLOCK fix).
     const r = await handleUpdateTask(
-      { task_id: taskId, status: 'done', notes: 'Approved.' },
+      { task_id: taskId, status: 'done' },
       'nova',
     )
     expect(r).not.toHaveProperty('error')
@@ -120,7 +125,7 @@ d('S17-BE-01 integration: full transition lifecycle (real DB)', () => {
 
 d('S17-BE-01 integration: rejection paths + atomic guard (real DB)', () => {
   beforeAll(async () => {
-    await seed()
+    await seed('docs') // docs → clarence at create; owner reassigns to scout in the P2 test
   })
 
   afterAll(async () => {
@@ -152,8 +157,101 @@ d('S17-BE-01 integration: rejection paths + atomic guard (real DB)', () => {
     expect(r).toHaveProperty('error', 'invalid_transition')
   })
 
-  it('P2: explicit reviewer gates review → pending-close', async () => {
+  it('SEC: field-smuggling — reviewer cannot overwrite owner-only fields during a transition', async () => {
+    // Live-proven exploit (Locksmith BLOCK, memory 3308): scout sent
+    // {status:'pending-close', metadata:{hijacked:true}} and the row gate
+    // admitted the write, overwriting owner-only metadata. The handler must
+    // now reject any reviewer/approver transition that carries owner fields.
+    // Own task with qa domain → scout is the create-stamped reviewer and the
+    // task can be walked to review cleanly.
+    const created = await handleCreateTask(
+      {
+        project_id: projectId,
+        title: 'Integration: reviewer smuggling',
+        estimated_hours: 1,
+        billing_low: 1,
+        billing_high: 1,
+        estimate_confidence: 'low',
+        assignee_agent_slug: ASSIGNEE,
+        metadata: { domain: 'qa' },
+      },
+      OWNER,
+    )
+    if ('error' in created) throw new Error(`smuggle seed failed: ${JSON.stringify(created)}`)
+    const tS = Number((created as { id: number }).id)
+    await handleUpdateTask({ task_id: tS, status: 'wip' }, ASSIGNEE)
+    await handleUpdateTask({ task_id: tS, status: 'review' }, ASSIGNEE)
+    const before = await pool.query<{ metadata: Record<string, unknown> }>(
+      `SELECT metadata FROM tasks WHERE id = $1`,
+      [tS],
+    )
+    const r = await handleUpdateTask(
+      { task_id: tS, status: 'pending-close', metadata: { domain: 'qa', hijacked: true } },
+      REVIEWER,
+    )
+    expect(r).toHaveProperty('error', 'invalid_transition')
+    // metadata unchanged — the smuggled write never landed
+    const after = await pool.query<{ metadata: Record<string, unknown> }>(
+      `SELECT metadata FROM tasks WHERE id = $1`,
+      [tS],
+    )
+    expect(after.rows[0]!.metadata).toEqual(before.rows[0]!.metadata)
+    // task state unchanged (still review) — the transition itself was blocked
+    const st = await pool.query<{ status: string }>(`SELECT status FROM tasks WHERE id = $1`, [tS])
+    expect(st.rows[0]!.status).toBe('review')
+    // control: the SAME reviewer, clean bare-status request — succeeds
+    const ok = await handleUpdateTask({ task_id: tS, status: 'pending-close' }, REVIEWER)
+    expect(ok).not.toHaveProperty('error')
+  })
+
+  it('SEC: approver cannot smuggle owner-only fields either (nova approving done)', async () => {
+    // parked task: reuse the rework-loop flow below? No — use the main task at
+    // pending-close AFTER the reassignment test below has gated it. This test
+    // walks its own task to pending-close first.
+    const created = await handleCreateTask(
+      {
+        project_id: projectId,
+        title: 'Integration: approver smuggling',
+        estimated_hours: 1,
+        billing_low: 1,
+        billing_high: 1,
+        estimate_confidence: 'low',
+        assignee_agent_slug: ASSIGNEE,
+        metadata: { domain: 'qa' },
+      },
+      OWNER,
+    )
+    if ('error' in created) throw new Error(`approver-smuggle seed failed: ${JSON.stringify(created)}`)
+    const t3 = Number((created as { id: number }).id)
+    await handleUpdateTask({ task_id: t3, status: 'wip' }, ASSIGNEE)
+    await handleUpdateTask({ task_id: t3, status: 'review' }, ASSIGNEE)
+    await handleUpdateTask({ task_id: t3, status: 'pending-close' }, REVIEWER)
+    // nova (approver) tries to approve AND overwrite metadata in one call
+    const r = await handleUpdateTask(
+      { task_id: t3, status: 'done', metadata: { domain: 'qa', hijacked: true } },
+      'nova',
+    )
+    expect(r).toHaveProperty('error', 'invalid_transition')
+    const row = await pool.query<{ status: string; metadata: Record<string, unknown> }>(
+      `SELECT status, metadata FROM tasks WHERE id = $1`, [t3],
+    )
+    expect(row.rows[0]!.status).toBe('pending-close')
+    expect(row.rows[0]!.metadata).toEqual({ domain: 'qa' })
+  })
+
+  it('P2: owner reassigns reviewer via update_task, then the new reviewer gates', async () => {
+    // Regression (Locksmith BLOCK, memory 3308): reviewer_agent_slug was not in
+    // the update schema — zod silently dropped it, and this test passed
+    // VACUOUSLY (scout was already stamped at create via qa→scout). Now the
+    // create uses domain 'docs' → clarence, and the owner reassigns to scout.
+    // The reassignment must PERSIST before scout can gate the transition.
     await handleUpdateTask({ task_id: taskId, reviewer_agent_slug: REVIEWER }, OWNER)
+    const row = await pool.query<{ reviewer_agent_slug: string | null }>(
+      `SELECT reviewer_agent_slug FROM tasks WHERE id = $1`,
+      [taskId],
+    )
+    // The write must actually stick — not a silent zod drop.
+    expect(row.rows[0]!.reviewer_agent_slug).toBe(REVIEWER)
     const r = await handleUpdateTask({ task_id: taskId, status: 'pending-close' }, REVIEWER)
     expect(r).not.toHaveProperty('error')
   })

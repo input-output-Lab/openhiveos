@@ -26,6 +26,15 @@ export const updateTaskSchema = z.object({
     .string()
     .refine(isValidAgentSlug, { message: 'Unknown agent slug' })
     .optional(),
+  // SEC-22: validated against squad.manifest.json — prevents raw PG 23503 FK
+  // violations from surfacing to the caller. OWNER-ONLY: reassigning the
+  // reviewer re-routes review authority — Locksmith BLOCK fix (2026-10-30,
+  // memory 3308): this field was previously absent from the schema, so zod
+  // silently dropped it and the D6 'owner may reassign' claim was false.
+  reviewer_agent_slug: z
+    .string()
+    .refine(isValidAgentSlug, { message: 'Unknown agent slug' })
+    .optional(),
   // SEC-ACCEPTED-F3 (Locksmith, 2026-05-20): github_pr_url accepts any valid URL
   // with no domain restriction. Same risk acceptance as create-task.ts.
   github_pr_url: z.string().url().optional(),
@@ -70,6 +79,7 @@ export async function handleUpdateTask(input: UpdateTaskInput, agentSlug: string
     parsed.description !== undefined ||
     parsed.unassign !== undefined ||
     parsed.assignee_agent_slug !== undefined ||
+    parsed.reviewer_agent_slug !== undefined ||
     parsed.github_pr_url !== undefined ||
     parsed.notes !== undefined ||
     parsed.metadata !== undefined ||
@@ -137,6 +147,29 @@ export async function handleUpdateTask(input: UpdateTaskInput, agentSlug: string
       }
     }
 
+    // FIELD-SMUGGLING GATE (Locksmith BLOCK fix, memory 3308): the row gate
+    // admits reviewer/approver rows for the transition it just authorized —
+    // but those roles may NOT carry owner-only fields in the same request.
+    // Without this, a reviewer could overwrite metadata/domain mid-transition
+    // (live-proven exploit: scout + {status:'pending-close', metadata:{...}}).
+    // Role carve-out per the ruling: reviewer may also write `notes` (review
+    // feedback) — nothing else. Approver is status-ONLY. Owner/assignee roles
+    // are governed by the field gate below, not this gate.
+    if (v.role === 'reviewer' || v.role === 'approver') {
+      // Owner-only fields minus `notes` (the reviewer carve-out). Approver:
+      // ANY owner-only field present is forbidden — status only.
+      const ownerFieldsExceptNotes =
+        ownerOnlyFieldsPresent && parsed.notes === undefined
+      const forbidden =
+        v.role === 'approver' ? ownerOnlyFieldsPresent : ownerFieldsExceptNotes
+      if (forbidden) {
+        return {
+          error: 'invalid_transition',
+          message: `The ${v.role} role may only write the status (and notes for reviewers) during a transition. Owner-only fields require the project owner.`,
+        }
+      }
+    }
+
     // Only guard from-state when the status actually changes (same-status
     // writes like a no-op status update would deadlock otherwise).
     if (parsed.status !== current.status) {
@@ -170,6 +203,7 @@ export async function handleUpdateTask(input: UpdateTaskInput, agentSlug: string
     ...(parsed.status !== undefined ? { status: parsed.status } : {}),
     ...(parsed.unassign !== undefined ? { unassign: parsed.unassign } : {}),
     ...(parsed.assignee_agent_slug !== undefined ? { assignee_agent_slug: parsed.assignee_agent_slug } : {}),
+    ...(parsed.reviewer_agent_slug !== undefined ? { reviewer_agent_slug: parsed.reviewer_agent_slug } : {}),
     ...(parsed.github_pr_url !== undefined ? { github_pr_url: parsed.github_pr_url } : {}),
     ...(parsed.notes !== undefined ? { notes: parsed.notes } : {}),
     ...(parsed.metadata !== undefined ? { metadata: parsed.metadata } : {}),

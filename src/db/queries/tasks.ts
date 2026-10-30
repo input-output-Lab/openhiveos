@@ -202,6 +202,10 @@ export async function updateTask(params: {
   // The approver may act even when allowAssigneePath is true (bare status
   // request) — admit via owner scope.
   callerIsApprover?: boolean
+  // S17-BE-01 (#2555, Locksmith BLOCK fix): OWNER-ONLY reviewer reassignment.
+  // Handler field-gates this to the owner path. P2 self-review guard mirrored
+  // here: setting reviewer to the current assignee is a no-op (kept NULL-safe).
+  reviewer_agent_slug?: string
   // S17-BE-01 (#2555): when called inside withActor(), pass the transaction
   // client here so the query executes on the connection where hive.actor is
   // SET LOCAL'd. SET LOCAL is connection-scoped — using pool.query() here
@@ -231,7 +235,12 @@ export async function updateTask(params: {
          estimated_hours     = COALESCE($13, estimated_hours),
          billing_low         = COALESCE($14, billing_low),
          billing_high        = COALESCE($15, billing_high),
-         estimate_confidence = COALESCE($16, estimate_confidence)
+         estimate_confidence = COALESCE($16, estimate_confidence),
+         reviewer_agent_slug = CASE
+           -- P2 self-review guard: never let reviewer == assignee stick.
+           WHEN $20::TEXT IS NOT NULL AND $20::TEXT = assignee_agent_slug THEN reviewer_agent_slug
+           ELSE COALESCE($20::TEXT, reviewer_agent_slug)
+         END
      WHERE id = $1
        AND ($17::TEXT IS NULL OR status = $17::TEXT)  -- #2555 atomic from-state guard
        AND (
@@ -275,6 +284,7 @@ export async function updateTask(params: {
       params.expectedFromStatus ?? null,
       params.callerIsReviewer ?? false,
       params.callerIsApprover ?? false,
+      params.reviewer_agent_slug ?? null,
     ],
   )
   return result.rows[0]
