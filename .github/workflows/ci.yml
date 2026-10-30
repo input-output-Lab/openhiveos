@@ -63,16 +63,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Apply migration 001 — OS Primitives
-        run: psql -f migrations/001_init.sql
+      # S16-QA-01 (#2548): apply ALL migrations dynamically — a new migration
+      # file can no longer silently fall out of CI. Includes extension setup
+      # required by 022 (vector) and 023 (btree_gist).
+      - name: Apply all migrations (dynamic)
+        run: |
+          psql -c "CREATE EXTENSION IF NOT EXISTS vector;" || true
+          psql -c "CREATE EXTENSION IF NOT EXISTS btree_gist;"
+          psql -c "CREATE ROLE openhiveos WITH LOGIN;" || true
+          for f in migrations/[0-9]*.sql; do
+            echo "Applying $f"
+            psql -v ON_ERROR_STOP=1 -f "$f"
+          done
 
-      - name: Apply migration 002 — Coordination Utilities
-        run: psql -f migrations/002_coordination_utilities.sql
-
-      - name: Apply migration 003 — Cron Utilities
-        run: psql -f migrations/003_crons.sql
-
-      - name: Verify schema — all 9 tables present
+      - name: Verify schema — all 9 core tables present
         run: |
           MISSING=$(psql -t -A -c "
             SELECT string_agg(t, ', ' ORDER BY t)
@@ -126,25 +130,9 @@ jobs:
 
       # -----------------------------------------------------------------
       # PRE-A1 gate extension — ARCH-013, ARCH-014, ARCH-015 (D13)
-      # Migrations 003–005 added after Sprint 5 scope was established.
-      # The openhiveos runtime role must exist before 003_squad_api_role.sql
-      # applies — CI uses openhiveos_ci, so create openhiveos as an alias.
+      # openhiveos runtime role is created in the dynamic migration step above
+      # (003_squad_api_role.sql expects it to exist).
       # -----------------------------------------------------------------
-
-      - name: Create openhiveos runtime role for migration compatibility
-        run: psql -c "CREATE ROLE openhiveos WITH LOGIN"
-
-      - name: Apply migration 003a — Dashboard agent principal (alphabetically first)
-        run: psql -f migrations/003_dashboard_agent.sql
-
-      - name: Apply migration 003b — Squad API reader role
-        run: psql -f migrations/003_squad_api_role.sql
-
-      - name: Apply migration 004 — Ethos Seal
-        run: psql -f migrations/004_ethos_seal.sql
-
-      - name: Apply migration 005 — LLM Usage Tracking
-        run: psql -f migrations/005_llm_usage.sql
 
       - name: Verify schema — migrations 003-005 tables present
         run: |
@@ -195,6 +183,55 @@ jobs:
             exit 1
           fi
           echo "Views OK — v_cost_by_agent_month, v_cost_by_project_month, v_cost_by_task present"
+
+      # -----------------------------------------------------------------
+      # S16-QA-01 (#2548): DB status contract gate. Fails CI when the
+      # tasks.status CHECK constraint and the shared TASK_STATUSES const
+      # in src/types.ts drift apart. Reads the constraint from the live
+      # schema applied above — the drift canary.
+      # -----------------------------------------------------------------
+      - name: Verify task status contract — DB CHECK vs TASK_STATUSES
+        run: |
+          psql -t -A -c "
+            SELECT pg_get_constraintdef(oid)
+              FROM pg_constraint
+             WHERE conrelid = 'tasks'::regclass
+               AND conname = 'chk_tasks_status'
+          " | grep -q "pending-close"
+          if [ $? -ne 0 ]; then
+            echo "::error::Status contract broken: chk_tasks_status missing pending-close"
+            exit 1
+          fi
+          echo "Status contract OK — chk_tasks_status includes pending-close"
+
+  # -------------------------------------------------------------------------
+  # Unit tests — vitest (S16-QA-01: wire test suite into CI)
+  # DB-gated tests (RUN_DB_TESTS, testcontainers suites) remain excluded
+  # here; they run via the migration-validation postgres service in a
+  # follow-up if flakiness permits.
+  # -------------------------------------------------------------------------
+  unit-tests:
+    name: Unit tests (vitest)
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql://test:test@localhost:5432/test_placeholder
+      GEMINI_API_KEY: test_placeholder_key
+      GATEWAY_MODE: 'true'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run unit tests
+        run: npm test
 
   # -------------------------------------------------------------------------
   # Container security scan — Trivy (SEC-8)

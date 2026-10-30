@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { TASK_STATUSES } from '../types.js'
 import { updateTask } from '../db/queries/tasks.js'
 import { isValidAgentSlug } from '../squad/manifest.js'
 
@@ -11,10 +12,10 @@ export const updateTaskSchema = z.object({
   description: z.string().max(5000).optional(),
   // ARCH-023: `pending-close` is the assignee terminal step. `done` requires
   // owner approval and is blocked on the assignee path by the M3 gate below.
-  // ARCH-024: `triage` is inbound-processor-only. Agents cannot set triage via
-  // update_task — only the inbound processor creates triage tasks. Promotion only
-  // path out of triage is PATCH /api/integrations/triage/:id/promote.
-  status: z.enum(['todo', 'wip', 'review', 'done', 'rework', 'pending-close']).optional(),
+  // ARCH-024: `triage` is inbound-processor-only — excluded from TASK_STATUSES
+  // so it cannot be set here; only the inbound processor creates triage tasks.
+  // Promotion only path out of triage is PATCH /api/integrations/triage/:id/promote.
+  status: z.enum(TASK_STATUSES).optional(),
   // unassign=true clears the assignee to NULL. Takes precedence over assignee_agent_slug.
   unassign: z.boolean().optional(),
   // SEC-22: validated against squad.manifest.json — prevents raw PG 23503 FK
