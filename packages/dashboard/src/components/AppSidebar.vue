@@ -155,6 +155,14 @@ const OrgIcon = () => h('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'cu
   h('path', { d: 'M7 11l-1 1m10-2l1 1' }),
 ])
 
+const IntegrationsIcon = () => h('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '2' }, [
+  h('path', { d: 'M12 2v5' }),
+  h('path', { d: 'M12 17v5' }),
+  h('path', { d: 'M2 12h5' }),
+  h('path', { d: 'M17 12h5' }),
+  h('circle', { cx: '12', cy: '12', r: '3' }),
+])
+
 interface NavLink {
   to: string
   icon: any
@@ -166,13 +174,14 @@ interface NavLink {
 // badge: number → show NavBadge; undefined → no badge
 // Icons: inline SVG components (ARCH-020)
 const activeLinks: NavLink[] = [
-  { to: '/',         icon: DashboardIcon, label: 'Dashboard' },
-  { to: '/inbox',    icon: InboxIcon, label: 'Inbox' },
-  { to: '/usage',    icon: UsageIcon, label: 'Usage & Cost' },
-  { to: '/agents',   icon: AgentsIcon, label: 'Agent Registry' },
-  { to: '/projects', icon: ProjectsIcon, label: 'Projects' },
-  { to: '/sops',     icon: SopsIcon, label: 'SOPs' },
-  { to: '/org',      icon: OrgIcon, label: 'Org Chart' },
+  { to: '/',              icon: DashboardIcon, label: 'Dashboard' },
+  { to: '/inbox',         icon: InboxIcon, label: 'Inbox' },
+  { to: '/integrations',  icon: IntegrationsIcon, label: 'Integrations' },
+  { to: '/usage',         icon: UsageIcon, label: 'Usage & Cost' },
+  { to: '/agents',        icon: AgentsIcon, label: 'Agent Registry' },
+  { to: '/projects',      icon: ProjectsIcon, label: 'Projects' },
+  { to: '/sops',          icon: SopsIcon, label: 'SOPs' },
+  { to: '/org',           icon: OrgIcon, label: 'Org Chart' },
 ]
 
 // Disabled (future sprint) — rendered as non-interactive spans

@@ -175,12 +175,23 @@ function validateTokenQuery(req: Request, res: Response, next: NextFunction): vo
  * ARCH-021: resolves the calling agent from the Bearer token via DB lookup.
  * Attaches the resolved agentSlug to res.locals for use in the /mcp handler.
  * SEC-D3: token value is never logged.
+ *
+ * For local development, MCP_GATEWAY_AUTH_DISABLED can be set to skip
+ * authentication and use a default agent slug.
  */
 async function resolveAgentFromBearer(
   req: Request,
   res: Response,
   next: NextFunction,
 ): Promise<void> {
+  // Development mode: skip auth if MCP_GATEWAY_AUTH_DISABLED is set
+  const authDisabled = process.env['MCP_GATEWAY_AUTH_DISABLED'] === 'true'
+  if (authDisabled) {
+    res.locals['agentSlug'] = 'elizabeth'
+    next()
+    return
+  }
+
   const authHeader = req.headers['authorization']
 
   if (typeof authHeader !== 'string' || !authHeader.startsWith('Bearer ')) {
