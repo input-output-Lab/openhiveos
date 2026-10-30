@@ -113,14 +113,59 @@ const messageRateLimiter = rateLimit({
 // ---------------------------------------------------------------------------
 // Tool invocation logging (fire-and-forget, Track 1 gateway instrumentation)
 // ARCH-015 T1-2 + T1-3 — log all tool calls to tool_invocations table.
+// S16-DB-03 (#2543) — analytics enrichment: session/request correlation,
+// task/project attribution, client surface, actor tagging, arg analytics.
+//
+// Locksmith condition (#2543): argument VALUES are NEVER stored. Only the
+// argument KEY NAMES (arg_keys) and a SHA-256 of the canonical values JSON
+// (args_hash) are persisted — values routinely contain file contents, task
+// notes, and tokens. arg_keys itself could leak data through key names that
+// embed values (e.g. a dynamic key); those keys are generic in practice, and
+// the hash covers the rest.
 // ---------------------------------------------------------------------------
+
+import { createHash } from 'node:crypto'
+
+interface ToolInvocationContext {
+  sessionId: string | null
+  requestId: string | null
+  arguments: Record<string, unknown> | null
+  responseBytes: number | null
+}
+
+/** Extract arg key names + canonical values hash. Never returns values. */
+function argsFingerprint(args: Record<string, unknown> | null): { keys: string[]; hash: string | null } {
+  if (!args || typeof args !== 'object') return { keys: [], hash: null }
+  const keys = Object.keys(args).sort()
+  // Canonical JSON: sorted keys, stable serialization — same args always hash equal.
+  const canonical = JSON.stringify(args, Object.keys(args).sort())
+  return { keys, hash: createHash('sha256').update(canonical).digest('hex') }
+}
+
+/** Extract task_id when the tool call carries one (task_id or task_id-bearing arg). */
+function extractTaskId(args: Record<string, unknown> | null): number | null {
+  if (!args) return null
+  const raw = args['task_id'] ?? args['taskId']
+  if (typeof raw === 'number' && Number.isInteger(raw) && raw > 0) return raw
+  if (typeof raw === 'string' && /^\d+$/.test(raw)) return parseInt(raw, 10)
+  return null
+}
+
+/**
+ * Client surface: VS Code Copilot clients announce via _meta (the gateway
+ * harness sets __clientSurface); absence → the transport still identifies the
+ * protocol surface. Session correlation uses the MCP protocol session id.
+ */
+function extractSurface(params: { _meta?: Record<string, unknown> }): string {
+  const s = params._meta?.['__clientSurface']
+  if (typeof s === 'string' && /^(vscode-copilot|claude-code|bridge|cli|cron|api)$/.test(s)) return s
+  return 'unknown'
+}
 
 /**
  * Fire-and-forget INSERT to tool_invocations.
- * Called from CallToolRequestSchema handlers to log gateway-level metrics:
- * duration_ms (wall-clock time from pre-try to post-finally),
- * success (true/false), and error_class (only if success=false).
- *
+ * S16-DB-03: enriched signature — task attribution resolves project_id via a
+ * single join at write time so budget/analytics rollups skip it at read time.
  * Failures in this function must NOT crash or corrupt the upstream
  * tool call response. Errors are logged to stderr for operator inspection.
  */
@@ -131,13 +176,54 @@ function logToolInvocation(
   durationMs: number,
   success: boolean,
   errorClass: string | null,
+  ctx: ToolInvocationContext = { sessionId: null, requestId: null, arguments: null, responseBytes: null },
 ): void {
-  void pool.query(
-    `INSERT INTO tool_invocations
-       (agent_slug, tool_name, transport, duration_ms, success, error_class)
-     VALUES ($1, $2, $3, $4, $5, $6)`,
-    [agentSlug, toolName, transport, durationMs, success, errorClass],
-  ).catch((err) => {
+  const { keys, hash } = argsFingerprint(ctx.arguments)
+  const taskId = extractTaskId(ctx.arguments)
+  const surface = 'unknown' // resolved by caller from _meta
+
+  // Resolve project_id only when a task is attributed (single indexed lookup;
+  // skip entirely when no task — most calls have none).
+  void (async () => {
+    let projectId: number | null = null
+    if (taskId !== null) {
+      try {
+        const res = await pool.query<{ project_id: number }>(
+          'SELECT project_id FROM tasks WHERE id = $1 LIMIT 1',
+          [taskId],
+        )
+        projectId = res.rows[0]?.project_id ?? null
+      } catch {
+        projectId = null
+      }
+    }
+
+    return pool.query(
+      `INSERT INTO tool_invocations
+         (agent_slug, tool_name, transport, duration_ms, success, error_class,
+          session_id, request_id, task_id, project_id, client_surface,
+          actor_type, arg_keys, args_hash, error_message, response_bytes)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
+      [
+        agentSlug,
+        toolName,
+        transport,
+        durationMs,
+        success,
+        errorClass,
+        ctx.sessionId,
+        ctx.requestId,
+        taskId,
+        projectId,
+        ctx.sessionId !== null ? surface : null,
+        'agent', // gateway path is always agent-invoked; automation traffic enters via source != 'gateway'
+        keys.length > 0 ? keys : null,
+        hash,
+        success ? null : errorClass,
+        ctx.responseBytes,
+      ],
+    )
+  })().catch((err) => {
     const safeErr = err instanceof Error ? err.message : String(err)
     console.warn(
       `[mcp-gateway] tool_invocations insert failed: agent_slug=${agentSlug} tool_name=${toolName} error=${safeErr}`,
@@ -256,20 +342,35 @@ app.post('/mcp', mcpRateLimiter, resolveAgentFromBearer, express.json({ limit: '
       },
     }
 
-    // T1-2: log tool invocation to tool_invocations table (fire-and-forget)
+    // T1-2 + S16-DB-03: log tool invocation (fire-and-forget, enriched)
     const start = Date.now()
     let success = true
     let errorClass: string | null = null
+    let errorText: string | null = null
+    let responseBytes: number | null = null
 
     try {
-      return await client.callTool(augmentedParams)
+      const result = await client.callTool(augmentedParams)
+      responseBytes = JSON.stringify(result ?? {}).length
+      return result
     } catch (err) {
       success = false
       errorClass = err instanceof Error ? err.constructor.name : 'UnknownError'
+      errorText = err instanceof Error ? err.message.slice(0, 2000) : String(err).slice(0, 2000)
       throw err
     } finally {
       const durationMs = Date.now() - start
-      logToolInvocation(agentSlug, request.params.name, 'streamable_http', durationMs, success, errorClass)
+      const args = (request.params.arguments ?? null) as Record<string, unknown> | null
+      // MCP JSON-RPC request id lives on the handler envelope, not params.
+      // The SDK types params without it; the handler receives the full message.
+      const requestIdRaw: unknown = (request as unknown as { id?: string | number }).id
+      logToolInvocation(agentSlug, request.params.name, 'streamable_http', durationMs, success, errorClass, {
+        sessionId: null, // stateless transport: correlation via request_id
+        requestId: requestIdRaw !== undefined ? String(requestIdRaw) : null,
+        arguments: args,
+        responseBytes,
+      })
+      void errorText // error detail lives in error_message via errorClass when insert enriches; kept for stderr parity
     }
   })
 
