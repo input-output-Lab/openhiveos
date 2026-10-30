@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { createTask } from '../db/queries/tasks.js'
 import { isValidAgentSlug } from '../squad/manifest.js'
+import { resolveReviewer } from './task-transitions.js'
 
 // S16-DB-02 (#2542): numeric estimate fields — Founder D2 "numeric values
 // always". Envelope sanity (low <= expected <= high) is enforced at DB level
@@ -58,6 +59,23 @@ export type CreateTaskInput = z.infer<typeof createTaskSchema>
 // inside the INSERT. This is the Locksmith-required pattern for auditability.
 export async function handleCreateTask(input: CreateTaskInput, agentSlug: string) {
   const parsed = createTaskSchema.parse(input)
+
+  // S17-BE-01 (#2555, D6): stamp the resolved reviewer at creation so the
+  // domain-default reviewer (qa→scout etc.) has row visibility for the
+  // review→pending-close gate. Fail-closed chain lives in task-transitions;
+  // owner may re-assign reviewer_agent_slug later via update_task.
+  const reviewer = resolveReviewer({
+    task: {
+      status: 'todo',
+      assignee_agent_slug: parsed.assignee_agent_slug ?? null,
+      reviewer_agent_slug: null,
+      project_owner_agent_slug: agentSlug,
+      metadata_domain:
+        typeof parsed.metadata?.['domain'] === 'string' ? parsed.metadata['domain'] : undefined,
+    },
+    callerAgentSlug: agentSlug,
+  })
+
   const result = await createTask({
     project_id: parsed.project_id,
     owner_agent_slug: agentSlug,
@@ -68,6 +86,7 @@ export async function handleCreateTask(input: CreateTaskInput, agentSlug: string
     estimate_confidence: parsed.estimate_confidence,
     ...(parsed.description !== undefined ? { description: parsed.description } : {}),
     ...(parsed.assignee_agent_slug !== undefined ? { assignee_agent_slug: parsed.assignee_agent_slug } : {}),
+    reviewer_agent_slug: reviewer,
     ...(parsed.github_pr_url !== undefined ? { github_pr_url: parsed.github_pr_url } : {}),
     ...(parsed.notes !== undefined ? { notes: parsed.notes } : {}),
     ...(parsed.metadata !== undefined ? { metadata: parsed.metadata } : {}),

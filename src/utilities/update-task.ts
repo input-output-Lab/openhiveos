@@ -95,6 +95,9 @@ export async function handleUpdateTask(input: UpdateTaskInput, agentSlug: string
   // 'system' identity is rejected inside assertTransition (P3): the cron path
   // for #2551 asserts its role server-side, never via this input.
   let expectedFromStatus: string | undefined
+  // Hoisted so the row-gate flags below can read the matrix resolution even
+  // though assertTransition only runs for status writes.
+  let verdict: ReturnType<typeof assertTransition> | undefined
   if (parsed.status !== undefined) {
     const current = await getTaskForActor(parsed.task_id, agentSlug)
     if (!current) {
@@ -112,7 +115,7 @@ export async function handleUpdateTask(input: UpdateTaskInput, agentSlug: string
     // allowAssigneePath is a FIELD gate, not a role determination. The matrix
     // is the single enforcement point for status transitions.
 
-    const verdict = assertTransition(
+    const v = assertTransition(
       {
         task: {
           status: current.status,
@@ -126,10 +129,11 @@ export async function handleUpdateTask(input: UpdateTaskInput, agentSlug: string
       },
       parsed.status,
     )
-    if (!verdict.ok) {
+    verdict = v
+    if (!v.ok) {
       return {
         error: 'invalid_transition',
-        message: verdict.reason,
+        message: v.reason,
       }
     }
 
@@ -145,12 +149,20 @@ export async function handleUpdateTask(input: UpdateTaskInput, agentSlug: string
   // the real caller. The transaction client is threaded into updateTask —
   // SET LOCAL is connection-scoped, so the UPDATE must run on the SAME
   // connection where hive.actor was set (E2E-caught bug otherwise).
+  //
+  // Row-gate widening: the matrix resolved the caller's role — a reviewer
+  // (scout/locksmith/clarence/silas per domain) is usually neither project
+  // owner nor assignee, so the DB row-gate must admit them for the status
+  // write it just authorized. Same trust level as expectedFromStatus: the
+  // matrix verdict IS the authorization.
   const result = await withActor(agentSlug, (tx) =>
     updateTask({
       client: tx,
       task_id: parsed.task_id,
       owner_agent_slug: agentSlug,
       allowAssigneePath,
+      ...(verdict?.ok ? { callerIsReviewer: verdict.role === 'reviewer' } : {}),
+      ...(verdict?.ok ? { callerIsApprover: verdict.role === 'approver' } : {}),
       ...(expectedFromStatus !== undefined ? { expectedFromStatus } : {}),
     ...(parsed.project_id !== undefined ? { project_id: parsed.project_id } : {}),
     ...(parsed.title !== undefined ? { title: parsed.title } : {}),

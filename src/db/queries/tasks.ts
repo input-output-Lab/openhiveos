@@ -26,6 +26,7 @@ export async function createTask(params: {
   title: string
   description?: string
   assignee_agent_slug?: string
+  reviewer_agent_slug?: string
   github_pr_url?: string
   notes?: string
   metadata?: Record<string, unknown>
@@ -44,9 +45,9 @@ export async function createTask(params: {
   }
 
   const result = await pool.query<Task>(
-    `INSERT INTO tasks (project_id, title, description, assignee_agent_slug, github_pr_url, notes, metadata,
+    `INSERT INTO tasks (project_id, title, description, assignee_agent_slug, reviewer_agent_slug, github_pr_url, notes, metadata,
                         estimated_hours, billing_low, billing_high, estimate_confidence)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
      RETURNING id, project_id, title, description, status, assignee_agent_slug,
                github_pr_url, notes, metadata, estimated_hours, billing_low,
                billing_high, estimate_confidence, created_at, updated_at`,
@@ -55,6 +56,7 @@ export async function createTask(params: {
       params.title,
       params.description ?? null,
       params.assignee_agent_slug ?? null,
+      params.reviewer_agent_slug ?? null,
       params.github_pr_url ?? null,
       params.notes ?? null,
       JSON.stringify(params.metadata ?? {}),
@@ -112,6 +114,14 @@ export async function getTaskForActor(
       metadata: Record<string, unknown>
     }
 > {
+  // S17-BE-01 (#2555): visibility scope = owner OR assignee OR the resolved
+  // reviewer for this task. Without the reviewer branch, a domain-default
+  // reviewer (e.g. scout on a QA task) could not even FETCH the task to act
+  // on it — the handler's opaque not_found would lock every reviewer out of
+  // review → pending-close. Fetching is read-only; the write gate remains
+  // the transition matrix. The approver branch mirrors resolveApprover: for
+  // elizabeth-owned tasks the approver is nova — who may be neither owner,
+  // assignee, nor reviewer. nova must fetch to act on pending-close → done.
   const result = await pool.query<{
     id: number
     status: TaskStatus
@@ -126,7 +136,13 @@ export async function getTaskForActor(
      FROM tasks t
      JOIN projects p ON p.id = t.project_id
      WHERE t.id = $1
-       AND (p.owner_agent_slug = $2 OR t.assignee_agent_slug = $2)`,
+       AND (
+         p.owner_agent_slug = $2
+         OR t.assignee_agent_slug = $2
+         OR t.reviewer_agent_slug = $2
+         -- #2555 approver visibility: nova on elizabeth-owned tasks
+         OR ($2 = 'nova' AND p.owner_agent_slug = 'elizabeth')
+       )`,
     [task_id, agentSlug],
   )
   return result.rows[0]
@@ -176,6 +192,16 @@ export async function updateTask(params: {
   billing_high?: number
   estimate_confidence?: 'low' | 'medium' | 'high'
   allowAssigneePath?: boolean
+  // S17-BE-01 (#2555): the transition matrix resolved the caller as the
+  // reviewer (explicit or domain-default) — a reviewer is usually neither the
+  // project owner nor the assignee, so the row gate must admit them via
+  // reviewer_agent_slug = caller. The handler has ALREADY verified the from→to
+  // matrix; this only widens row visibility. Never set for owner-only fields.
+  callerIsReviewer?: boolean
+  // S17-BE-01 (#2555): the matrix resolved 'approver' (pending-close → done).
+  // The approver may act even when allowAssigneePath is true (bare status
+  // request) — admit via owner scope.
+  callerIsApprover?: boolean
   // S17-BE-01 (#2555): when called inside withActor(), pass the transaction
   // client here so the query executes on the connection where hive.actor is
   // SET LOCAL'd. SET LOCAL is connection-scoped — using pool.query() here
@@ -211,6 +237,14 @@ export async function updateTask(params: {
        AND (
          project_id IN (SELECT id FROM projects WHERE owner_agent_slug = $2)
          OR ($11 AND assignee_agent_slug = $2)
+         -- #2555 S17-BE-01: matrix-resolved reviewer/approver row admission.
+         -- Handler already verified from→to; the DB just widens visibility to
+         -- the caller when the matrix says reviewer or approver.
+         OR ($18::BOOLEAN AND reviewer_agent_slug = $2)
+         -- Approver has no DB column (elizabeth normally = owner → covered
+         -- above; nova-on-elizabeth-tasks is identified only by the matrix
+         -- resolution, same trust level as expectedFromStatus).
+         OR ($19::BOOLEAN)
        )
      RETURNING id, project_id, title, description, status, assignee_agent_slug,
                github_pr_url, notes, metadata, estimated_hours, billing_low,
@@ -239,6 +273,8 @@ export async function updateTask(params: {
       params.billing_high ?? null,
       params.estimate_confidence ?? null,
       params.expectedFromStatus ?? null,
+      params.callerIsReviewer ?? false,
+      params.callerIsApprover ?? false,
     ],
   )
   return result.rows[0]
