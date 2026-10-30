@@ -43,3 +43,7 @@ backups/
 /S*.md
 /TASK-*.md
 /patch_*.js
+
+# Local-only operational files (machine-specific, never commit)
+one.seal.json
+ecosystem.config.cjs.local

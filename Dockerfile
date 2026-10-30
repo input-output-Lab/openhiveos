@@ -55,8 +55,11 @@ WORKDIR /app
 ENV NODE_ENV=production
 
 # Install production dependencies only
+# --ignore-scripts: skip prepare/husky hook — husky is a devDependency and
+# absent under --omit=dev; without the flag `npm ci` exits 127 (`husky: not
+# found`). Same rationale as the runtime stage below (line ~101).
 COPY package*.json ./
-RUN npm ci --omit=dev && npm cache clean --force
+RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
 
 # Copy compiled MCP server + squad-api output
 COPY --from=build /app/dist ./dist

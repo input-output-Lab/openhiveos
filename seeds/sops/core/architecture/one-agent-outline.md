@@ -1,9 +1,9 @@
 ---
 title: "Agent Outline — Canonical Agent File Specification"
-version: "1.0.0"
+version: "1.1.0"
 scope: "one"
 status: "active"
-review_date: "2026-09-30"
+review_date: "2026-10-30"
 tags:
   - type/sop
   - domain/architecture
@@ -72,15 +72,16 @@ Heading must be exactly:
 ## Session Start Gate (MANDATORY — no exceptions)
 ```
 
-Three mandatory steps:
+Two mandatory steps:
 
 ```
 1. FIRST tool call → search_memory({ query: <topic>, limit: 8 }) — load context
 2. SECOND tool call → search_sops({ query: <topic>, limit: 3 }) — load process. Surface gaps, do not improvise.
-3. If generating large output → get_session_usage({ session_id }) before starting. Flag if >70%. Critical if ≥80%.
 ```
 
 The rationale block above the steps must be specific to this agent's domain — not generic copy-paste.
+
+> v1.1.0 change: the former step 3 (`get_session_usage`) is removed. `get_session_usage` is not an OpenHive MCP tool; instructing agents to call it guaranteed a failure. Do not reintroduce it. (#2546 fix 2)
 
 Followed by `---`.
 
@@ -103,15 +104,26 @@ Sub-sections in strict order:
 
 **Task Status Gate (MANDATORY — no exceptions)** [ALWAYS PRESENT]:
 1. BEFORE work → `update_task({ task_id, status: 'wip' })` as FIRST tool call. No task_id → `create_task()` first. Never work on an unregistered task.
-2. AFTER work → `update_task({ task_id, status: 'review' })` as LAST tool call.
-3. Blocked → `update_task({ task_id, notes: 'Blocked: <reason>.' })`
-4. Never set DONE yourself → submit `pending-close`.
-5. New work → `create_task()`. Workload check → `query_tasks({ assignee_agent_slug: '<slug>' })`
+2. AFTER work → `update_task({ task_id, status: 'review' })` as LAST tool call. The assignee's terminal submission is `review` — `pending-close` and `done` belong to the reviewer/approver chain, never the assignee.
+3. Blocked → do NOT write the `notes` field (owner-only; the call is rejected for assignees). Instead: `store_thought({ thought: 'Blocked: <reason>.', thought_type: 'concern', must_surface: true })` and surface the blocker verbally to the user. Leave the task in its current status.
+4. Never set DONE yourself → reviewer marks `pending-close`, approver confirms `done`.
+5. Approver rule: **Elizabeth approves done; for tasks assigned to Elizabeth, Nova approves.** M3 gate — never self-approve.
+6. New work → `create_task()`. Workload check → `query_tasks({ assignee_agent_slug: '<slug>' })`
+
+> v1.1.0 change: steps 3–4 rewritten. Old wording directed assignees to write the `notes` field, which the API rejects for non-owners, and implied assignees submit `pending-close`, contradicting the reviewer chain. (#2546 fixes 3–5)
 
 **VS Code Session Usage Reporting** [ALWAYS PRESENT]:
-- Generate `session_id` once: `<slug>:vscode:<Date.now()>` — before first tool call.
-- At session end: `report_usage({ session_id, loop_index: 0, agent_slug: '<slug>', model: 'claude-sonnet-4-5', provider: 'anthropic', prompt_tokens: 0, completion_tokens: 0, cost_usd: 0 })`
-- All numeric fields are **integers**. Zeros are valid.
+- Generate `session_id` once: `<slug>:vscode:<Date.now()>` — before first tool call. Do NOT regenerate mid-session.
+- At session end, report the session's actual consumption. Take model, provider, prompt/completion token counts, and cost from the VS Code chat footer when visible. Include `task_id` when the session performed registered task work — unattributed usage is invisible to the budget ledger.
+- Example shape (replace values with the session's real ones):
+
+```
+report_usage({ session_id, loop_index: 0, agent_slug: '<slug>', task_id: <id if applicable>, model: '<actual model>', provider: '<actual provider>', prompt_tokens: <actual int>, completion_tokens: <actual int>, cost_usd: <actual number> })
+```
+
+- All numeric fields are **integers**. Zeros are valid ONLY when the transport genuinely exposes no data — never emit zeros as a convenience, and never hardcode a model or provider string. An untruthful row is worse than an honest unknown.
+
+> v1.1.0 change: the hardcoded `model: 'claude-sonnet-4-5'` / all-zeros call is removed. It produced unattributed $0 rows with a wrong model label, corrupting cost analytics. (#2546 fix 1)
 
 **Failure mode**: Retry twice (500ms, 1000ms). If unavailable: *"MCP server unavailable. Memory context could not be loaded."*
 
@@ -155,7 +167,7 @@ These rules are validated by `POST /api/one/validate-agent`:
 |---|---|---|
 | 1 | Frontmatter key order | `name` appears before `description` |
 | 2 | Identity section | `## Identity` heading present |
-| 3 | Session Start Gate | `## Session Start Gate` present AND contains `get_session_usage` |
+| 3 | Session Start Gate | `## Session Start Gate` present AND contains `search_memory` |
 | 4 | Continuous Calibration | Text "Continuous Calibration Protocol" present |
 | 5 | Task Status Gate | Text "Task Status Gate" AND "MANDATORY" present |
 | 6 | Constraints heading | No `## Hard Constraints` heading |
@@ -171,8 +183,11 @@ A file that fails any rule is not deployment-ready.
 |---|---|---|
 | Wrong frontmatter key order | `description` before `name` | Move `name` to first key |
 | Bare identity text | No `## Identity` heading, just paragraph | Add `## Identity` heading |
-| Soft session gate | "Before responding..." | Replace with MANDATORY 3-step gate |
+| Soft session gate | "Before responding..." | Replace with MANDATORY 2-step gate |
 | Missing calibration protocol | No correction/learning loop | Add Continuous Calibration Protocol sub-section |
 | Old constraints heading | `## Hard Constraints` | Rename to `## Constraints` |
 | Missing memory channel rule | No `.md` prohibition | Add NEVER rule to Constraints |
-| Missing context pressure | No `get_session_usage` | Add as Step 3 of Session Start Gate |
+| Ghost tool reference | `get_session_usage` anywhere in the file | Remove — the tool does not exist; keep the 2-step gate |
+| Hardcoded usage report | `model: 'claude-sonnet-4-5'` or all-zero report_usage in template | Replace with actual-values call shape; zeros only when data genuinely absent |
+| Assignee writing notes field | `update_task({ task_id, notes: ... })` in Blocked path | Use `store_thought(must_surface: true)` + verbal surfacing instead |
+| Approver rule absent | No "Elizabeth approves done; Nova approves Elizabeth's tasks" in Task Status Gate | Add approver rule line |

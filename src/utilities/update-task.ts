@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { TASK_STATUSES } from '../types.js'
 import { updateTask } from '../db/queries/tasks.js'
 import { isValidAgentSlug } from '../squad/manifest.js'
 
@@ -11,10 +12,10 @@ export const updateTaskSchema = z.object({
   description: z.string().max(5000).optional(),
   // ARCH-023: `pending-close` is the assignee terminal step. `done` requires
   // owner approval and is blocked on the assignee path by the M3 gate below.
-  // ARCH-024: `triage` is inbound-processor-only. Agents cannot set triage via
-  // update_task — only the inbound processor creates triage tasks. Promotion only
-  // path out of triage is PATCH /api/integrations/triage/:id/promote.
-  status: z.enum(['todo', 'wip', 'review', 'done', 'rework', 'pending-close']).optional(),
+  // ARCH-024: `triage` is inbound-processor-only — excluded from TASK_STATUSES
+  // so it cannot be set here; only the inbound processor creates triage tasks.
+  // Promotion only path out of triage is PATCH /api/integrations/triage/:id/promote.
+  status: z.enum(TASK_STATUSES).optional(),
   // unassign=true clears the assignee to NULL. Takes precedence over assignee_agent_slug.
   unassign: z.boolean().optional(),
   // SEC-22: validated against squad.manifest.json — prevents raw PG 23503 FK
@@ -27,6 +28,12 @@ export const updateTaskSchema = z.object({
   // with no domain restriction. Same risk acceptance as create-task.ts.
   github_pr_url: z.string().url().optional(),
   notes: z.string().max(5000).optional(),
+  // S16-DB-02 (#2542): estimate revision is owner-only (like metadata).
+  // Numeric envelope sanity checked in superRefine below.
+  estimated_hours:     z.number().positive().max(999).optional(),
+  billing_low:         z.number().min(0).max(999).optional(),
+  billing_high:        z.number().positive().max(999).optional(),
+  estimate_confidence: z.enum(['low', 'medium', 'high']).optional(),
   // Operator-defined classification metadata. Owner-only field — assignees may
   // not overwrite metadata (only status transitions are permitted on the assignee
   // path). Domain-agnostic JSONB; replaces the full metadata object on update.
@@ -63,7 +70,11 @@ export async function handleUpdateTask(input: UpdateTaskInput, agentSlug: string
     parsed.assignee_agent_slug !== undefined ||
     parsed.github_pr_url !== undefined ||
     parsed.notes !== undefined ||
-    parsed.metadata !== undefined
+    parsed.metadata !== undefined ||
+    parsed.estimated_hours !== undefined ||
+    parsed.billing_low !== undefined ||
+    parsed.billing_high !== undefined ||
+    parsed.estimate_confidence !== undefined
 
   const allowAssigneePath = !ownerOnlyFieldsPresent
 
@@ -92,6 +103,10 @@ export async function handleUpdateTask(input: UpdateTaskInput, agentSlug: string
     ...(parsed.github_pr_url !== undefined ? { github_pr_url: parsed.github_pr_url } : {}),
     ...(parsed.notes !== undefined ? { notes: parsed.notes } : {}),
     ...(parsed.metadata !== undefined ? { metadata: parsed.metadata } : {}),
+    ...(parsed.estimated_hours !== undefined ? { estimated_hours: parsed.estimated_hours } : {}),
+    ...(parsed.billing_low !== undefined ? { billing_low: parsed.billing_low } : {}),
+    ...(parsed.billing_high !== undefined ? { billing_high: parsed.billing_high } : {}),
+    ...(parsed.estimate_confidence !== undefined ? { estimate_confidence: parsed.estimate_confidence } : {}),
   })
   if (!result) {
     return {

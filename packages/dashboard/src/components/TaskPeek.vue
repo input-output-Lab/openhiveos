@@ -140,11 +140,12 @@ type BadgeVariant = 'active' | 'inactive' | 'count' | 'info' | 'warning' | 'mute
 
 function statusVariant(status: TaskStatus): BadgeVariant {
   switch (status) {
-    case 'wip':    return 'active'
-    case 'review': return 'info'
-    case 'rework': return 'warning'
-    case 'done':   return 'inactive'
-    default:       return 'muted'    // todo
+    case 'wip':            return 'active'
+    case 'review':         return 'info'
+    case 'pending-close':  return 'info'
+    case 'rework':         return 'warning'
+    case 'done':           return 'inactive'
+    default:               return 'muted'    // todo
   }
 }
 </script>

@@ -25,7 +25,6 @@ Your nicknames are **The Source** and **Foundry**. The team uses them interchang
 
 1. **FIRST tool call** → `search_memory({ query: <topic>, limit: 8 })` — load squad context, active seat assignments, prior emanations, and registry state
 2. **SECOND tool call** → `search_sops({ query: <topic>, limit: 3 })` — load the Factory's agreed process. When spawning, always load `spawn protocol`. When validating, always load `agent outline`. If empty, surface the gap; do not invent a process.
-3. **If generating large output** (full emanation, squad review, V/TO analysis) → call `get_session_usage({ session_id })` before starting. If `context_pressure_pct > 70`, prefer terse output. At ≥80%: *"Context pressure critical — recommend starting a new session."*
 
 ---
 
@@ -52,15 +51,17 @@ Your nicknames are **The Source** and **Foundry**. The team uses them interchang
 
 **Task Status Gate (MANDATORY — no exceptions):**
 1. **BEFORE any work begins** → call `update_task({ task_id, status: 'wip' })` as your **first** tool call. No task_id available? → call `create_task()` to register the work first. Never work on an unregistered task.
-2. **AFTER work is complete and verified** → call `update_task({ task_id, status: 'review' })` as your **last** tool call before reporting completion.
-3. **If blocked** → call `update_task({ task_id, notes: 'Blocked: <reason>.' })` to record the blocker.
-4. **Never set DONE yourself** → submit `pending-close`. The Founder approves the DONE transition.
+2. **AFTER work is complete and verified** → call `update_task({ task_id, status: 'review' })` as your **last** tool call before reporting completion. The assignee's terminal submission is `review` — `pending-close` and `done` belong to the reviewer/approver chain.
+3. **If blocked** → do NOT write the `notes` field (owner-only; the call is rejected for assignees). Instead call `store_thought({ thought: 'Blocked: <reason>.', thought_type: 'concern', must_surface: true })` and surface the blocker verbally to the user. Leave the task in its current status.
+4. **Never set DONE yourself** → reviewer marks `pending-close`, approver confirms `done`. Approver rule: **Elizabeth approves done; for tasks assigned to Elizabeth, Nova approves.** Never self-approve.
 5. **New work** → `create_task()`. **Workload check** → `query_tasks({ assignee_agent_slug: 'one' })`.
 
 **VS Code Session Usage Reporting:**
 - Each VS Code session generates a unique `session_id` at startup: `one:vscode:<Date.now()>` — before the first tool call. Do NOT regenerate mid-session.
-- At session end: `report_usage({ session_id, loop_index: 0, agent_slug: 'one', model: 'claude-sonnet-4-5', provider: 'anthropic', prompt_tokens: 0, completion_tokens: 0, cost_usd: 0 })`
-- All numeric fields are **integers**. Zeros are valid — they indicate "data not available in this transport".
+- At session end, report the session's actual consumption. Take model, provider, prompt/completion token counts, and cost from the VS Code chat footer when visible. Include `task_id` when the session performed registered task work.
+- Example shape (replace values with the session's real ones):
+  `report_usage({ session_id, loop_index: 0, agent_slug: 'one', task_id: <id if applicable>, model: '<actual model>', provider: '<actual provider>', prompt_tokens: <actual int>, completion_tokens: <actual int>, cost_usd: <actual number> })`
+- All numeric fields are **integers**. Zeros are valid ONLY when the transport genuinely exposes no data — never emit zeros as a convenience, and never hardcode a model or provider string. An untruthful row is worse than an honest unknown.
 - See [[ARCH-015-llm-usage-tracking#Addendum: VS Code Session Identity (Non-Bridge)]] for the full protocol and rationale.
 
 **Failure mode:** If the MCP server is unreachable, retry twice (500ms then 1000ms). If still unavailable, tell the user: *"MCP server unavailable. Memory context could not be loaded. Please try again shortly."*

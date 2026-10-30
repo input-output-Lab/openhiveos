@@ -121,7 +121,7 @@ export interface TaskCostRow {
 
 // ─── Tasks ────────────────────────────────────────────────────────────────────
 
-export type TaskStatus = 'todo' | 'wip' | 'review' | 'done' | 'rework'
+export type TaskStatus = 'todo' | 'wip' | 'review' | 'pending-close' | 'rework' | 'done'
 
 export interface TaskRow {
   id: number

@@ -1,5 +1,6 @@
 import { Router } from 'express'
 import { withReaderRole } from '../db.js'
+import { TASK_STATUSES } from '../../types.js'
 
 // ---------------------------------------------------------------------------
 // /api/tasks — task roster (ARCH-019 Sprint 9, S9-BE-01)
@@ -26,8 +27,9 @@ import { withReaderRole } from '../db.js'
 const router = Router()
 
 // SEC-C3: VALID_TASK_STATUSES must be a named const — single audit point.
-// Must stay in sync with the CHECK constraint on tasks.status in the migration.
-const VALID_TASK_STATUSES = ['todo', 'wip', 'review', 'done', 'rework'] as const
+// S16-BE-01: now re-exports the shared TASK_STATUSES from src/types.ts so the
+// REST filter cannot drift from the DB CHECK constraint or the MCP enums.
+const VALID_TASK_STATUSES = TASK_STATUSES
 
 type ValidTaskStatus = typeof VALID_TASK_STATUSES[number]
 

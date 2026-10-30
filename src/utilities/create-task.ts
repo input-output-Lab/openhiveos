@@ -2,9 +2,24 @@ import { z } from 'zod'
 import { createTask } from '../db/queries/tasks.js'
 import { isValidAgentSlug } from '../squad/manifest.js'
 
+// S16-DB-02 (#2542): numeric estimate fields — Founder D2 "numeric values
+// always". Envelope sanity (low <= expected <= high) is enforced at DB level
+// (chk_tasks_estimates_bounds) and pre-checked here for a clean 400 instead
+// of a 500. Arty rule (D10): no task without an estimate.
+export const estimateFieldsSchema = {
+  estimated_hours: z.number().positive().max(999),
+  billing_low: z.number().min(0).max(999),
+  billing_high: z.number().positive().max(999),
+  estimate_confidence: z.enum(['low', 'medium', 'high']),
+}
+
+const estimateEnvelopeCheck = (val: { estimated_hours: number; billing_low: number; billing_high: number }): boolean =>
+  val.billing_low <= val.estimated_hours && val.estimated_hours <= val.billing_high
+
 export const createTaskSchema = z.object({
   project_id: z.number().int().positive(),
   title: z.string().min(1).max(500),
+  ...estimateFieldsSchema,
   description: z.string().max(5000).optional(),
   // SEC-22: validated against squad.manifest.json — prevents raw PG 23503 FK
   // violations from surfacing to the caller. Established pattern: isValidAgentSlug.
@@ -25,6 +40,17 @@ export const createTaskSchema = z.object({
   metadata: z.record(z.unknown()).optional(),
 })
 
+// Arty rule enforcement: validate envelope AFTER object construction
+createTaskSchema.superRefine((val, ctx) => {
+  if (!estimateEnvelopeCheck(val)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Invalid estimate envelope: billing_low must be <= estimated_hours <= billing_high',
+      path: ['billing_high'],
+    })
+  }
+})
+
 export type CreateTaskInput = z.infer<typeof createTaskSchema>
 
 // SEC-21: owner_agent_slug is server-injected. The DB layer performs an explicit
@@ -36,6 +62,10 @@ export async function handleCreateTask(input: CreateTaskInput, agentSlug: string
     project_id: parsed.project_id,
     owner_agent_slug: agentSlug,
     title: parsed.title,
+    estimated_hours: parsed.estimated_hours,
+    billing_low: parsed.billing_low,
+    billing_high: parsed.billing_high,
+    estimate_confidence: parsed.estimate_confidence,
     ...(parsed.description !== undefined ? { description: parsed.description } : {}),
     ...(parsed.assignee_agent_slug !== undefined ? { assignee_agent_slug: parsed.assignee_agent_slug } : {}),
     ...(parsed.github_pr_url !== undefined ? { github_pr_url: parsed.github_pr_url } : {}),

@@ -1,6 +1,6 @@
 {
   "name": "openhiveos",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "OpenHiveOS — the open operating system for AI agent teams",
   "private": true,
   "type": "module",
@@ -33,6 +33,7 @@
     "gray-matter": "^4.0.3",
     "pg": "^8.13.0",
     "pgvector": "^0.2.0",
+    "proxy-addr": "2.0.8",
     "zod": "^3.23.0"
   },
   "devDependencies": {

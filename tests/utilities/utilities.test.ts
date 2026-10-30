@@ -915,6 +915,10 @@ describe('TC-U3: create-project', () => {
 // TC-U4: create-task (14 tests)
 // ---------------------------------------------------------------------------
 
+
+// S16-DB-02 (#2542): Arty rule — every task requires numeric estimates.
+const estimate = { estimated_hours: 5, billing_low: 4, billing_high: 6, estimate_confidence: 'medium' as const }
+
 describe('TC-U4: create-task', () => {
   beforeEach(() => { vi.clearAllMocks() })
 
@@ -922,6 +926,8 @@ describe('TC-U4: create-task', () => {
     mockCreateTask.mockResolvedValueOnce({ authorized: true, task: stubTask })
     const result = await handleCreateTask(
       {
+        ...estimate,
+
         project_id: 1,
         title: 'Fix bug',
         description: 'A description',
@@ -935,58 +941,59 @@ describe('TC-U4: create-task', () => {
 
   it('TC-U4-2: creates task with minimal fields (project_id + title)', async () => {
     mockCreateTask.mockResolvedValueOnce({ authorized: true, task: stubTask })
-    const result = await handleCreateTask({ project_id: 1, title: 'Fix bug' }, AGENT)
+    const result = await handleCreateTask({ ...estimate, project_id: 1, title: 'Fix bug' }, AGENT)
     expect(result).toEqual(stubTask)
     expect(mockCreateTask).toHaveBeenCalledWith(expect.objectContaining({ owner_agent_slug: AGENT }))
   })
 
   it('TC-U4-3: returns error when project not owned or not found', async () => {
     mockCreateTask.mockResolvedValueOnce({ authorized: false })
-    const result = await handleCreateTask({ project_id: 1, title: 'Fix bug' }, AGENT)
+    const result = await handleCreateTask({ ...estimate, project_id: 1, title: 'Fix bug' }, AGENT)
     expect(result).toHaveProperty('error', 'not_found_or_unauthorized')
   })
 
   it('TC-U4-4: rejects project_id ≤ 0 at schema level', async () => {
-    await expect(handleCreateTask({ project_id: 0, title: 'Fix bug' }, AGENT)).rejects.toThrow()
+    await expect(handleCreateTask({ ...estimate, project_id: 0, title: 'Fix bug' }, AGENT)).rejects.toThrow()
   })
 
   it('TC-U4-5: rejects title > 500 chars at schema level', async () => {
-    await expect(handleCreateTask({ project_id: 1, title: 'x'.repeat(501) }, AGENT)).rejects.toThrow()
+    await expect(handleCreateTask({ ...estimate, project_id: 1, title: 'x'.repeat(501) }, AGENT)).rejects.toThrow()
   })
 
   it('TC-U4-6: rejects empty title at schema level', async () => {
-    await expect(handleCreateTask({ project_id: 1, title: '' }, AGENT)).rejects.toThrow()
+    await expect(handleCreateTask({ ...estimate, project_id: 1, title: '' }, AGENT)).rejects.toThrow()
   })
 
   it('TC-U4-7: rejects description > 5000 chars at schema level', async () => {
     await expect(
-      handleCreateTask({ project_id: 1, title: 'Fix bug', description: 'x'.repeat(5001) }, AGENT),
+      handleCreateTask({ ...estimate, project_id: 1, title: 'Fix bug', description: 'x'.repeat(5001) }, AGENT),
     ).rejects.toThrow()
   })
 
   it('TC-U4-8: rejects notes > 5000 chars at schema level', async () => {
     await expect(
-      handleCreateTask({ project_id: 1, title: 'Fix bug', notes: 'x'.repeat(5001) }, AGENT),
+      handleCreateTask({ ...estimate, project_id: 1, title: 'Fix bug', notes: 'x'.repeat(5001) }, AGENT),
     ).rejects.toThrow()
   })
 
   it('TC-U4-9: rejects invalid github_pr_url at schema level', async () => {
     await expect(
-      handleCreateTask({ project_id: 1, title: 'Fix bug', github_pr_url: 'not-a-url' }, AGENT),
+      handleCreateTask({ ...estimate, project_id: 1, title: 'Fix bug', github_pr_url: 'not-a-url' }, AGENT),
     ).rejects.toThrow()
   })
 
   it('TC-U4-10: rejects unknown assignee_agent_slug at schema level', async () => {
     mockIsValidAgentSlug.mockReturnValueOnce(false)
     await expect(
-      handleCreateTask({ project_id: 1, title: 'Fix bug', assignee_agent_slug: 'ghost-agent' }, AGENT),
+      handleCreateTask({ ...estimate, project_id: 1, title: 'Fix bug', assignee_agent_slug: 'ghost-agent' }, AGENT),
     ).rejects.toThrow()
   })
 
   it('TC-U4-11: accepts valid assignee_agent_slug', async () => {
     mockCreateTask.mockResolvedValueOnce({ authorized: true, task: stubTask })
     const result = await handleCreateTask(
-      { project_id: 1, title: 'Fix bug', assignee_agent_slug: 'other-agent' },
+      { ...estimate,
+ project_id: 1, title: 'Fix bug', assignee_agent_slug: 'other-agent' },
       AGENT,
     )
     expect(result).toEqual(stubTask)
@@ -994,19 +1001,20 @@ describe('TC-U4: create-task', () => {
 
   it('TC-U4-12: handles DB error from query layer', async () => {
     mockCreateTask.mockRejectedValueOnce(new Error('DB error'))
-    await expect(handleCreateTask({ project_id: 1, title: 'Fix bug' }, AGENT)).rejects.toThrow('DB error')
+    await expect(handleCreateTask({ ...estimate, project_id: 1, title: 'Fix bug' }, AGENT)).rejects.toThrow('DB error')
   })
 
   it('TC-U4-13: title at exactly 500 chars (boundary) accepted', async () => {
     mockCreateTask.mockResolvedValueOnce({ authorized: true, task: stubTask })
-    const result = await handleCreateTask({ project_id: 1, title: 'x'.repeat(500) }, AGENT)
+    const result = await handleCreateTask({ ...estimate, project_id: 1, title: 'x'.repeat(500) }, AGENT)
     expect(result).toEqual(stubTask)
   })
 
   it('TC-U4-14: accepts valid github_pr_url with HTTPS', async () => {
     mockCreateTask.mockResolvedValueOnce({ authorized: true, task: stubTask })
     const result = await handleCreateTask(
-      { project_id: 1, title: 'Fix bug', github_pr_url: 'https://github.com/org/repo/pull/42' },
+      { ...estimate,
+ project_id: 1, title: 'Fix bug', github_pr_url: 'https://github.com/org/repo/pull/42' },
       AGENT,
     )
     expect(result).toEqual(stubTask)
@@ -1262,13 +1270,13 @@ describe('TC-U9: query-tasks', () => {
   it('TC-U9-2: filters by project_id', async () => {
     mockQueryTasks.mockResolvedValueOnce([stubTask])
     await handleQueryTasks({ project_id: 1 }, AGENT)
-    expect(mockQueryTasks).toHaveBeenCalledWith(expect.objectContaining({ project_id: 1 }), AGENT)
+    expect(mockQueryTasks).toHaveBeenCalledWith(expect.objectContaining({ project_id: 1 }), AGENT, undefined)
   })
 
   it('TC-U9-3: filters by status todo', async () => {
     mockQueryTasks.mockResolvedValueOnce([stubTask])
     await handleQueryTasks({ status: 'todo' }, AGENT)
-    expect(mockQueryTasks).toHaveBeenCalledWith(expect.objectContaining({ status: 'todo' }), AGENT)
+    expect(mockQueryTasks).toHaveBeenCalledWith(expect.objectContaining({ status: 'todo' }), AGENT, undefined)
   })
 
   it('TC-U9-4: filters by assignee_agent_slug', async () => {
@@ -1277,11 +1285,27 @@ describe('TC-U9: query-tasks', () => {
     expect(mockQueryTasks).toHaveBeenCalledWith(
       expect.objectContaining({ assignee_agent_slug: AGENT }),
       AGENT,
+      undefined,
     )
   })
 
   it('TC-U9-5: rejects invalid status enum at schema level', async () => {
     await expect(handleQueryTasks({ status: 'cancelled' as any }, AGENT)).rejects.toThrow()
+  })
+
+  // S16-BE-01 regression: pending-close was missing from the query enum
+  it('TC-U9-10: accepts status pending-close (S16-BE-01)', async () => {
+    mockQueryTasks.mockResolvedValueOnce([stubTask])
+    await handleQueryTasks({ status: 'pending-close' }, AGENT)
+    expect(mockQueryTasks).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'pending-close' }),
+      AGENT,
+      undefined,
+    )
+  })
+
+  it('TC-U9-11: rejects triage — inbound-processor-only, never a filter value (S16-BE-01)', async () => {
+    await expect(handleQueryTasks({ status: 'triage' as any }, AGENT)).rejects.toThrow()
   })
 
   it('TC-U9-6: rejects project_id ≤ 0 at schema level', async () => {
@@ -1297,7 +1321,7 @@ describe('TC-U9: query-tasks', () => {
   it('TC-U9-8: passes agentSlug to DB layer for owner scoping', async () => {
     mockQueryTasks.mockResolvedValueOnce([])
     await handleQueryTasks({}, AGENT)
-    expect(mockQueryTasks).toHaveBeenCalledWith(expect.any(Object), AGENT)
+    expect(mockQueryTasks).toHaveBeenCalledWith(expect.any(Object), AGENT, undefined)
   })
 
   it('TC-U9-9: handles DB error from query layer', async () => {
@@ -1890,9 +1914,14 @@ describe('TC-U17: report-usage', () => {
     expect(mockFetch).not.toHaveBeenCalled()
   })
 
-  it('TC-U17-3: rejects payload missing required cost_usd field', async () => {
-    const { cost_usd, ...payloadWithoutCost } = validPayload
-    await expect(handleReportUsage(payloadWithoutCost as any)).rejects.toThrow()
+  it('TC-U17-3: accepts payload missing cost_usd — SEC-C9 v2 makes it optional (server estimates)', async () => {
+    const { cost_usd: _cost, ...payloadWithoutCost } = validPayload
+    mockFetch.mockResolvedValueOnce({ ok: true, status: 201, text: async () => 'Created' } as any)
+    const result = await handleReportUsage(payloadWithoutCost as any)
+    expect(result.success).toBe(true)
+    // body sent must NOT contain cost_usd when the caller omitted it
+    const sentBody = JSON.parse(mockFetch.mock.calls[0]?.[1] ? String((mockFetch.mock.calls[0][1] as RequestInit).body) : '{}')
+    expect(sentBody).not.toHaveProperty('cost_usd')
   })
 
   it('TC-U17-4: rejects payload with unknown fields (strict mode)', async () => {
@@ -1989,7 +2018,7 @@ describe('TC-U17: report-usage', () => {
     expect(result.message).toContain('Network timeout')
   })
 
-  it('TC-U17-12: reports cost and model in success message', async () => {
+  it('TC-U17-12: reports model in success message (SEC-C9 v2: cost may be server-estimated)', async () => {
     mockFetch.mockResolvedValueOnce({
       ok: true,
       status: 201,
@@ -1998,7 +2027,6 @@ describe('TC-U17: report-usage', () => {
 
     const result = await handleReportUsage(validPayload)
     expect(result.success).toBe(true)
-    expect(result.message).toContain('39.9')
     expect(result.message).toContain('Claude Sonnet 4.6')
   })
 
