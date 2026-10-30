@@ -1,5 +1,5 @@
 import { pool } from '../client.js'
-import type { Task, Sprint } from '../../types.js'
+import type { Task, Sprint, TaskStatus } from '../../types.js'
 
 // ---------------------------------------------------------------------------
 // ARCH-010 query contracts — Tasks and Sprints
@@ -87,6 +87,76 @@ export async function createTask(params: {
 // Pass a slug to set a new assignee. Pass neither to leave unchanged.
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// getTaskForActor
+// S17-BE-01 (#2555): single-task fetch scoped to the actor's visibility
+// (owner of the project OR assignee of the task). Used by the transition
+// gate in handleUpdateTask to resolve the caller's role BEFORE mutating.
+// Joins projects for the owner slug — the transition module needs it for
+// fail-closed reviewer/approver resolution.
+// ---------------------------------------------------------------------------
+
+export async function getTaskForActor(
+  task_id: number,
+  agentSlug: string,
+): Promise<
+  | undefined
+  | {
+      id: number
+      status: TaskStatus
+      assignee_agent_slug: string | null
+      reviewer_agent_slug: string | null
+      project_id: number
+      project_owner_agent_slug: string
+      metadata: Record<string, unknown>
+    }
+> {
+  const result = await pool.query<{
+    id: number
+    status: TaskStatus
+    assignee_agent_slug: string | null
+    reviewer_agent_slug: string | null
+    project_id: number
+    project_owner_agent_slug: string
+    metadata: Record<string, unknown>
+  }>(
+    `SELECT t.id, t.status, t.assignee_agent_slug, t.reviewer_agent_slug,
+            t.project_id, p.owner_agent_slug AS project_owner_agent_slug, t.metadata
+     FROM tasks t
+     JOIN projects p ON p.id = t.project_id
+     WHERE t.id = $1
+       AND (p.owner_agent_slug = $2 OR t.assignee_agent_slug = $2)`,
+    [task_id, agentSlug],
+  )
+  return result.rows[0]
+}
+
+// ---------------------------------------------------------------------------
+// updateTask
+// SEC-21: ownership check embedded in WHERE — project must be owned by the
+// requesting agent. Returns undefined if task does not exist or agent is
+// not authorized.
+//
+// Model C (decided 2026-05-21): hybrid permission.
+//   - Project owner: may update ALL fields on any task in their project.
+//   - Assignee: may update the `status` field ONLY on tasks assigned to them,
+//     regardless of project ownership.
+//
+// The allowAssigneePath flag is set by the handler when the request contains
+// only status — no owner-only fields. The DB enforces the row gate; the
+// handler enforces the field gate. Both must hold.
+//
+// S17-BE-01 (#2555): expectedFromStatus — ATOMIC from-state guard. The handler
+// resolves the transition against the fetched status, but fetch-then-update
+// alone has a TOCTOU race (two concurrent reviewers both read 'review'). This
+// param is re-asserted in the UPDATE's WHERE so a concurrent status change
+// makes the second writer match 0 rows. Set only for status transitions; a
+// NULL leaves the guard inactive (non-status writes don't race the machine).
+//
+// assignee handling: pass unassign=true to clear the assignee to NULL.
+// Pass a slug to set a new assignee. Pass neither to leave unchanged.
+// ---------------------------------------------------------------------------
+
 export async function updateTask(params: {
   task_id: number
   owner_agent_slug: string
@@ -94,6 +164,7 @@ export async function updateTask(params: {
   title?: string
   description?: string
   status?: string
+  expectedFromStatus?: string
   unassign?: boolean
   assignee_agent_slug?: string
   github_pr_url?: string
@@ -129,6 +200,7 @@ export async function updateTask(params: {
          billing_high        = COALESCE($15, billing_high),
          estimate_confidence = COALESCE($16, estimate_confidence)
      WHERE id = $1
+       AND ($17::TEXT IS NULL OR status = $17::TEXT)  -- #2555 atomic from-state guard
        AND (
          project_id IN (SELECT id FROM projects WHERE owner_agent_slug = $2)
          OR ($11 AND assignee_agent_slug = $2)
@@ -150,15 +222,16 @@ export async function updateTask(params: {
       // M1 (ARCH-023 / SEC-21): The DB WHERE clause does NOT gate status values
       // on the assignee path — it only gates which rows the assignee may touch.
       // An assignee who reaches this point can write any valid status. The
-      // handler is the sole enforcement layer for status-value scope on the
-      // assignee path. Any change to allowAssigneePath computation in the handler
-      // is a Tier 3 security change and requires Locksmith review at PR-open.
+      // handler enforces the transition matrix (S17-BE-01 #2555); this WHERE's
+      // expectedFromStatus re-assertion is the ATOMIC backstop against TOCTOU.
+      // Both layers are Tier 3 — Locksmith review at PR-open.
       params.allowAssigneePath ?? false,
       params.metadata !== undefined ? JSON.stringify(params.metadata) : null,
       params.estimated_hours ?? null,
       params.billing_low ?? null,
       params.billing_high ?? null,
       params.estimate_confidence ?? null,
+      params.expectedFromStatus ?? null,
     ],
   )
   return result.rows[0]

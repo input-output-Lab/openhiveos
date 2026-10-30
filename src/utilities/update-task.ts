@@ -1,7 +1,8 @@
 import { z } from 'zod'
 import { TASK_STATUSES } from '../types.js'
-import { updateTask } from '../db/queries/tasks.js'
+import { updateTask, getTaskForActor } from '../db/queries/tasks.js'
 import { isValidAgentSlug } from '../squad/manifest.js'
+import { assertTransition } from './task-transitions.js'
 
 export const updateTaskSchema = z.object({
   task_id: z.number().int().positive(),
@@ -78,15 +79,65 @@ export async function handleUpdateTask(input: UpdateTaskInput, agentSlug: string
 
   const allowAssigneePath = !ownerOnlyFieldsPresent
 
-  // M3 gate (ARCH-023 — SEC-21 extension): On the assignee path, `done` is not
-  // a valid target status. Assignees submit `pending-close`; only the project
-  // owner may approve the pending-close → done transition. The DB does not
-  // enforce status-value scope on the assignee path independently — this gate
-  // is the only enforcement layer. Changes here are Tier 3 / require Locksmith review.
-  if (allowAssigneePath && parsed.status === 'done') {
-    return {
-      error: 'not_found_or_unauthorized',
-      message: 'Task not found or you are not authorized to update it.',
+  // S17-BE-01 (#2555): FULL transition gate — replaces the M3-only check.
+  // Locksmith Tier-3 ruling (memory 3302, properties P1–P5):
+  //   1. Resolve the caller's visibility on this task (owner OR assignee;
+  //      a non-visible caller gets the same opaque not_found error as before
+  //      — no existence oracle for strangers).
+  //   2. Only a STATUS change passes through the transition matrix. Non-status
+  //      writes remain owner-only via the field gate above.
+  //   3. assertTransition resolves the caller's role (owner/assignee/reviewer/
+  //      approver) and validates from→to against the ruling's fail-closed
+  //      table. Rejections are opaque to the caller (not_found) but logged.
+  //   4. The DB re-asserts the fetched from-state atomically (expectedFromStatus)
+  //      — closing the fetch-then-update TOCTOU race.
+  // 'system' identity is rejected inside assertTransition (P3): the cron path
+  // for #2551 asserts its role server-side, never via this input.
+  let expectedFromStatus: string | undefined
+  if (parsed.status !== undefined) {
+    const current = await getTaskForActor(parsed.task_id, agentSlug)
+    if (!current) {
+      return {
+        error: 'not_found_or_unauthorized',
+        message: 'Task not found or you are not authorized to update it.',
+      }
+    }
+
+    // M3 gate (ARCH-023) is subsumed by the matrix: 'done' from any state is
+    // only permitted as approver/system from pending-close — an assignee can
+    // never satisfy it. Kept as an explicit early guard for defense-in-depth.
+    if (allowAssigneePath && parsed.status === 'done') {
+      return {
+        error: 'not_found_or_unauthorized',
+        message: 'Task not found or you are not authorized to update it.',
+      }
+    }
+
+    const verdict = assertTransition(
+      {
+        task: {
+          status: current.status,
+          assignee_agent_slug: current.assignee_agent_slug,
+          reviewer_agent_slug: current.reviewer_agent_slug,
+          project_owner_agent_slug: current.project_owner_agent_slug,
+          metadata_domain:
+            typeof current.metadata.domain === 'string' ? current.metadata.domain : undefined,
+        },
+        callerAgentSlug: agentSlug,
+      },
+      parsed.status,
+    )
+    if (!verdict.ok) {
+      return {
+        error: 'invalid_transition',
+        message: verdict.reason,
+      }
+    }
+
+    // Only guard from-state when the status actually changes (same-status
+    // writes like a no-op status update would deadlock otherwise).
+    if (parsed.status !== current.status) {
+      expectedFromStatus = current.status
     }
   }
 
@@ -94,6 +145,7 @@ export async function handleUpdateTask(input: UpdateTaskInput, agentSlug: string
     task_id: parsed.task_id,
     owner_agent_slug: agentSlug,
     allowAssigneePath,
+    ...(expectedFromStatus !== undefined ? { expectedFromStatus } : {}),
     ...(parsed.project_id !== undefined ? { project_id: parsed.project_id } : {}),
     ...(parsed.title !== undefined ? { title: parsed.title } : {}),
     ...(parsed.description !== undefined ? { description: parsed.description } : {}),
