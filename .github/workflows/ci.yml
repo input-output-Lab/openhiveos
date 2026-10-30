@@ -285,21 +285,26 @@ jobs:
       - name: Run Trivy — CRITICAL exit on any finding (SEC-8)
         uses: aquasecurity/trivy-action@v0.33.1
         with:
+          # Pin the scanner binary: the action's default trivy version drifts
+          # (v0.33.1 defaulted to v0.65.0, which does not exist upstream —
+          # 404 at download). 0.76.1 is a verified published release.
+          version: v0.76.1
           image-ref: openhiveos:ci-scan
           format: table
           exit-code: '1'
           ignore-unfixed: true
           vuln-type: os,library
           severity: CRITICAL
-          trivyignore-file: .trivyignore
+          trivyignores: .trivyignore
 
       - name: Run Trivy — HIGH findings summary (informational, no exit)
         uses: aquasecurity/trivy-action@v0.33.1
         with:
+          version: v0.76.1
           image-ref: openhiveos:ci-scan
           format: table
           exit-code: '0'
           ignore-unfixed: true
           vuln-type: os,library
           severity: HIGH
-          trivyignore-file: .trivyignore
+          trivyignores: .trivyignore
