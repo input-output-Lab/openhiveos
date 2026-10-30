@@ -13,9 +13,7 @@ docs
 .pre-commit-config.yaml
 .nvmrc
 eslint.config.js
-# tsconfig.json is REQUIRED in the build context — Dockerfile line 44 copies
-# it into the builder stage (tsc won't run without it). Excluding it broke
-# the CI Trivy image build with "/tsconfig.json": not found.
-tsconfig.json
+# tsconfig.json must remain IN the build context — Dockerfile:44 copies it
+# into the builder stage (tsc cannot run without it). Do not exclude.
 public
 docker-compose*.yml
