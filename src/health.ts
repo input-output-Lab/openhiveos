@@ -1,7 +1,14 @@
 import { createServer } from 'node:http'
+import { readFileSync } from 'node:fs'
 import { config } from './config.js'
 import { pool } from './db/client.js'
 import { manifest } from './squad/manifest.js'
+
+// Release version — read from package.json so /health always matches the
+// deployed release (v0.2.0 drift proved a hardcoded literal rots).
+const VERSION: string =
+  (JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version?: string })
+    .version ?? 'unknown'
 
 // ---------------------------------------------------------------------------
 // Health server
@@ -10,6 +17,9 @@ import { manifest } from './squad/manifest.js'
 // Exposes GET /health for Docker health checks and external monitoring.
 //
 // Port: HEALTH_PORT env var (default 3000)
+//
+// Version is read from package.json at build time — keep in sync with the
+// root release version (do NOT hardcode; it drifted at v0.2.0 otherwise).
 //
 // S2-08 (ARCH-008 addendum): the {agents} field was stripped from this
 // response. Squad composition is internal information -- exposing agent slugs
@@ -58,7 +68,7 @@ export function startHealthServer(): void {
         const schema = await checkSchema()
         const payload: HealthPayload = {
           status: schema.ok ? 'ok' : 'degraded',
-          version: '0.1.0',
+          version: VERSION,
           squad: manifest.squad,
           db: 'connected',
           schema: schema.ok ? 'ok' : 'degraded',
@@ -71,7 +81,7 @@ export function startHealthServer(): void {
       .catch((err: unknown) => {
         const payload: HealthPayload = {
           status: 'degraded',
-          version: '0.1.0',
+          version: VERSION,
           squad: manifest.squad,
           db: 'error',
           error: err instanceof Error ? err.message : 'unknown error',
