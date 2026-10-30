@@ -3,9 +3,9 @@ import { z } from 'zod'
 import { reportUsageSchema } from '../../src/utilities/report-usage.js'
 
 // ---------------------------------------------------------------------------
-// S17-DB-01: enriched ingestion schema contract.
-// Locks the #2554 boundary: cost_usd REQUIRED (SEC-C9 unchanged); the new
-// migration-022 fields are all OPTIONAL; .strict() still rejects unknowns.
+// S17-DB-01 + S17-SEC-01: enriched ingestion schema contract.
+// SEC-C9 v2 (ruling #1096): cost_usd OPTIONAL; cost_source server-owned and
+// rejected from callers; .strict() still rejects unknowns.
 // ---------------------------------------------------------------------------
 
 const base = {
@@ -63,9 +63,14 @@ describe('S17-DB-01: enriched usage ingestion schema', () => {
     expect(r.success).toBe(false)
   })
 
-  it('SEC-C9 unchanged: cost_usd still required', () => {
+  it('SEC-C9 v2: cost_usd now optional (missing cost → server estimate path)', () => {
     const { cost_usd: _omit, ...withoutCost } = base
     const r = reportUsageSchema.safeParse(withoutCost)
+    expect(r.success).toBe(true)
+  })
+
+  it('SEC-C11: cost_source is NOT caller-settable', () => {
+    const r = reportUsageSchema.safeParse({ ...base, cost_source: 'estimated' })
     expect(r.success).toBe(false)
   })
 

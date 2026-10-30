@@ -11,7 +11,8 @@ import { config } from '../config.js'
 //
 // SEC-C4  — Zod validates all fields; .strict() rejects unknown fields.
 // SEC-C5  — session_id regex: ^[a-z][a-z0-9_-]*:[^:]+:\d{13}$
-// SEC-C9  — cost_usd required (USD value from VS Code footer).
+// SEC-C9  — REVISED v2 (ruling #1096): cost_usd optional; server estimates
+//           when absent. cost_source is server-owned and not caller-settable.
 // SEC-C10 — OPENHIVEOS_INGESTION_TOKEN is optional; POST fails gracefully if token unavailable.
 // ---------------------------------------------------------------------------
 
@@ -30,7 +31,8 @@ export const reportUsageSchema = z
     provider: z.string().min(1).max(128),
     prompt_tokens: z.number().int().min(0),
     completion_tokens: z.number().int().min(0),
-    cost_usd: z.number().min(0),
+    // SEC-C9 v2 (ruling #1096): optional — server estimates when absent.
+    cost_usd: z.number().min(0).optional(),
     cache_read_tokens: z.number().int().min(0).optional(),
     cache_creation_tokens: z.number().int().min(0).optional(),
     task_id: z.number().int().positive().optional(),
@@ -90,7 +92,7 @@ export async function handleReportUsage(input: ReportUsageInput): Promise<{
 
     return {
       success: true,
-      message: `LLM usage reported successfully (${String(parsed.cost_usd)} USD, ${parsed.model})`,
+      message: `LLM usage reported successfully (${parsed.model})`,
     }
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err)

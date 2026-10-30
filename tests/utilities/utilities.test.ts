@@ -1906,9 +1906,14 @@ describe('TC-U17: report-usage', () => {
     expect(mockFetch).not.toHaveBeenCalled()
   })
 
-  it('TC-U17-3: rejects payload missing required cost_usd field', async () => {
-    const { cost_usd, ...payloadWithoutCost } = validPayload
-    await expect(handleReportUsage(payloadWithoutCost as any)).rejects.toThrow()
+  it('TC-U17-3: accepts payload missing cost_usd — SEC-C9 v2 makes it optional (server estimates)', async () => {
+    const { cost_usd: _cost, ...payloadWithoutCost } = validPayload
+    mockFetch.mockResolvedValueOnce({ ok: true, status: 201, text: async () => 'Created' } as any)
+    const result = await handleReportUsage(payloadWithoutCost as any)
+    expect(result.success).toBe(true)
+    // body sent must NOT contain cost_usd when the caller omitted it
+    const sentBody = JSON.parse(mockFetch.mock.calls[0]?.[1] ? String((mockFetch.mock.calls[0][1] as RequestInit).body) : '{}')
+    expect(sentBody).not.toHaveProperty('cost_usd')
   })
 
   it('TC-U17-4: rejects payload with unknown fields (strict mode)', async () => {
@@ -2005,7 +2010,7 @@ describe('TC-U17: report-usage', () => {
     expect(result.message).toContain('Network timeout')
   })
 
-  it('TC-U17-12: reports cost and model in success message', async () => {
+  it('TC-U17-12: reports model in success message (SEC-C9 v2: cost may be server-estimated)', async () => {
     mockFetch.mockResolvedValueOnce({
       ok: true,
       status: 201,
@@ -2014,7 +2019,6 @@ describe('TC-U17: report-usage', () => {
 
     const result = await handleReportUsage(validPayload)
     expect(result.success).toBe(true)
-    expect(result.message).toContain('39.9')
     expect(result.message).toContain('Claude Sonnet 4.6')
   })
 
