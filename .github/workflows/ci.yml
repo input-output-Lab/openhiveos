@@ -234,6 +234,10 @@ jobs:
       DATABASE_URL: postgresql://test:test@localhost:5432/test_placeholder
       GEMINI_API_KEY: test_placeholder_key
       GATEWAY_MODE: 'true'
+      # SEC-C1: config schema requires a min-64-char ingestion token at import
+      # time. CI never posts to /internal/usage — placeholder only, never a
+      # real value. Individual tests that exercise ingestion set their own.
+      OPENHIVEOS_INGESTION_TOKEN: ci_placeholder_ingestion_token_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
     steps:
       - name: Checkout
         uses: actions/checkout@v4
