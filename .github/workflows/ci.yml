@@ -66,11 +66,17 @@ jobs:
       # S16-QA-01 (#2548): apply ALL migrations dynamically — a new migration
       # file can no longer silently fall out of CI. Includes extension setup
       # required by 022 (vector) and 023 (btree_gist).
+      # Role setup: migration 007 (SEC-7) issues ALTER DEFAULT PRIVILEGES FOR
+      # ROLE opensquad_migrate and grants to opensquad_app — both roles must
+      # exist in the CI database before migrations run (they are provisioned
+      # by ops in real environments, not by migrations).
       - name: Apply all migrations (dynamic)
         run: |
           psql -c "CREATE EXTENSION IF NOT EXISTS vector;" || true
           psql -c "CREATE EXTENSION IF NOT EXISTS btree_gist;"
           psql -c "CREATE ROLE openhiveos WITH LOGIN;" || true
+          psql -c "CREATE ROLE opensquad_migrate WITH LOGIN;" || true
+          psql -c "CREATE ROLE opensquad_app WITH LOGIN;" || true
           for f in migrations/[0-9]*.sql; do
             echo "Applying $f"
             psql -v ON_ERROR_STOP=1 -f "$f"
@@ -257,7 +263,7 @@ jobs:
         run: docker build --target production -t openhiveos:ci-scan .
 
       - name: Run Trivy — CRITICAL exit on any finding (SEC-8)
-        uses: aquasecurity/trivy-action@0.30.0
+        uses: aquasecurity/trivy-action@0.28.0
         with:
           image-ref: openhiveos:ci-scan
           format: table
@@ -268,7 +274,7 @@ jobs:
           trivyignore-file: .trivyignore
 
       - name: Run Trivy — HIGH findings summary (informational, no exit)
-        uses: aquasecurity/trivy-action@0.30.0
+        uses: aquasecurity/trivy-action@0.28.0
         with:
           image-ref: openhiveos:ci-scan
           format: table
