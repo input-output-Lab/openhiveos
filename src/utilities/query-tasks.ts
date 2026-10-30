@@ -1,9 +1,11 @@
 import { z } from 'zod'
 import { queryTasks } from '../db/queries/tasks.js'
+import { TASK_STATUSES } from '../types.js'
 
 export const queryTasksSchema = z.object({
   project_id: z.number().int().positive().optional(),
-  status: z.enum(['todo', 'wip', 'review', 'done', 'rework']).optional(),
+  // S16-BE-01: driven by the shared TASK_STATUSES (includes pending-close).
+  status: z.enum(TASK_STATUSES).optional(),
   assignee_agent_slug: z.string().optional(),
   // JSONB containment filter — each key/value pair must be present in the task's
   // metadata. Uses Postgres @> operator. Array values must be passed as arrays.

@@ -1262,13 +1262,13 @@ describe('TC-U9: query-tasks', () => {
   it('TC-U9-2: filters by project_id', async () => {
     mockQueryTasks.mockResolvedValueOnce([stubTask])
     await handleQueryTasks({ project_id: 1 }, AGENT)
-    expect(mockQueryTasks).toHaveBeenCalledWith(expect.objectContaining({ project_id: 1 }), AGENT)
+    expect(mockQueryTasks).toHaveBeenCalledWith(expect.objectContaining({ project_id: 1 }), AGENT, undefined)
   })
 
   it('TC-U9-3: filters by status todo', async () => {
     mockQueryTasks.mockResolvedValueOnce([stubTask])
     await handleQueryTasks({ status: 'todo' }, AGENT)
-    expect(mockQueryTasks).toHaveBeenCalledWith(expect.objectContaining({ status: 'todo' }), AGENT)
+    expect(mockQueryTasks).toHaveBeenCalledWith(expect.objectContaining({ status: 'todo' }), AGENT, undefined)
   })
 
   it('TC-U9-4: filters by assignee_agent_slug', async () => {
@@ -1277,11 +1277,27 @@ describe('TC-U9: query-tasks', () => {
     expect(mockQueryTasks).toHaveBeenCalledWith(
       expect.objectContaining({ assignee_agent_slug: AGENT }),
       AGENT,
+      undefined,
     )
   })
 
   it('TC-U9-5: rejects invalid status enum at schema level', async () => {
     await expect(handleQueryTasks({ status: 'cancelled' as any }, AGENT)).rejects.toThrow()
+  })
+
+  // S16-BE-01 regression: pending-close was missing from the query enum
+  it('TC-U9-10: accepts status pending-close (S16-BE-01)', async () => {
+    mockQueryTasks.mockResolvedValueOnce([stubTask])
+    await handleQueryTasks({ status: 'pending-close' }, AGENT)
+    expect(mockQueryTasks).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'pending-close' }),
+      AGENT,
+      undefined,
+    )
+  })
+
+  it('TC-U9-11: rejects triage — inbound-processor-only, never a filter value (S16-BE-01)', async () => {
+    await expect(handleQueryTasks({ status: 'triage' as any }, AGENT)).rejects.toThrow()
   })
 
   it('TC-U9-6: rejects project_id ≤ 0 at schema level', async () => {
@@ -1297,7 +1313,7 @@ describe('TC-U9: query-tasks', () => {
   it('TC-U9-8: passes agentSlug to DB layer for owner scoping', async () => {
     mockQueryTasks.mockResolvedValueOnce([])
     await handleQueryTasks({}, AGENT)
-    expect(mockQueryTasks).toHaveBeenCalledWith(expect.any(Object), AGENT)
+    expect(mockQueryTasks).toHaveBeenCalledWith(expect.any(Object), AGENT, undefined)
   })
 
   it('TC-U9-9: handles DB error from query layer', async () => {

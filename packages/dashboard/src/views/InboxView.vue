@@ -146,12 +146,13 @@ import TaskPeek from '../components/TaskPeek.vue'
 // ─── Filter strip ─────────────────────────────────────────────────────────────
 
 const STATUS_FILTERS: { label: string; value: TaskStatus | null }[] = [
-  { label: 'All',    value: null },
-  { label: 'Todo',   value: 'todo' },
-  { label: 'WIP',    value: 'wip' },
-  { label: 'Review', value: 'review' },
-  { label: 'Done',   value: 'done' },
-  { label: 'Rework', value: 'rework' },
+  { label: 'All',            value: null },
+  { label: 'Todo',           value: 'todo' },
+  { label: 'WIP',            value: 'wip' },
+  { label: 'Review',         value: 'review' },
+  { label: 'Pending close',  value: 'pending-close' },
+  { label: 'Done',           value: 'done' },
+  { label: 'Rework',         value: 'rework' },
 ]
 
 const activeFilter = ref<TaskStatus | null>(null)

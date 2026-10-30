@@ -82,7 +82,13 @@ export interface DispositionProfile {
 
 export type ProjectStatus = 'active' | 'archived'
 
-export type TaskStatus = 'todo' | 'wip' | 'review' | 'done' | 'rework' | 'pending-close'
+// SEC-C3 single audit point for task statuses (S16-BE-01). Order matters:
+// describes the lifecycle. DB CHECK constraint must match (see migration 019).
+// 'triage' is deliberately excluded — it is inbound-processor-only (ARCH-024)
+// and must never be writable via update_task or appear as a filter value.
+export const TASK_STATUSES = ['todo', 'wip', 'review', 'pending-close', 'rework', 'done'] as const
+
+export type TaskStatus = (typeof TASK_STATUSES)[number]
 
 export interface Project {
   id: number
