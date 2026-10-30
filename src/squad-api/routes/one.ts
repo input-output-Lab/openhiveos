@@ -116,9 +116,12 @@ function validateAgentContent(content: string): string[] {
     }
   }
 
-  // Rule 3: Session Start Gate must reference get_session_usage as step 3
-  if (content.includes('## Session Start Gate') && !content.includes('get_session_usage')) {
-    violations.push('Session Start Gate is missing step 3: `get_session_usage` call for context pressure check')
+  // Rule 3: Session Start Gate must open with search_memory as FIRST tool call.
+  // (v1.1.0, #2546: get_session_usage is not an OpenHive MCP tool — the old
+  // check required agents to call a tool that does not exist. search_memory is
+  // the real step 1 of the mandatory gate.)
+  if (content.includes('## Session Start Gate') && !content.includes('search_memory')) {
+    violations.push('Session Start Gate is missing step 1: `search_memory` call to load context')
   }
 
   // Rule 4: Continuous Calibration Protocol must be present
