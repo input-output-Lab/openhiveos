@@ -28,6 +28,10 @@ export async function createTask(params: {
   github_pr_url?: string
   notes?: string
   metadata?: Record<string, unknown>
+  estimated_hours: number
+  billing_low: number
+  billing_high: number
+  estimate_confidence: 'low' | 'medium' | 'high'
 }): Promise<{ authorized: false } | { authorized: true; task: Task }> {
   // Pre-flight: verify the requesting agent owns this project
   const ownership = await pool.query<{ id: number }>(
@@ -39,10 +43,12 @@ export async function createTask(params: {
   }
 
   const result = await pool.query<Task>(
-    `INSERT INTO tasks (project_id, title, description, assignee_agent_slug, github_pr_url, notes, metadata)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)
+    `INSERT INTO tasks (project_id, title, description, assignee_agent_slug, github_pr_url, notes, metadata,
+                        estimated_hours, billing_low, billing_high, estimate_confidence)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
      RETURNING id, project_id, title, description, status, assignee_agent_slug,
-               github_pr_url, notes, metadata, created_at, updated_at`,
+               github_pr_url, notes, metadata, estimated_hours, billing_low,
+               billing_high, estimate_confidence, created_at, updated_at`,
     [
       params.project_id,
       params.title,
@@ -51,6 +57,10 @@ export async function createTask(params: {
       params.github_pr_url ?? null,
       params.notes ?? null,
       JSON.stringify(params.metadata ?? {}),
+      params.estimated_hours,
+      params.billing_low,
+      params.billing_high,
+      params.estimate_confidence,
     ],
   )
   const row = result.rows[0]
@@ -89,6 +99,10 @@ export async function updateTask(params: {
   github_pr_url?: string
   notes?: string
   metadata?: Record<string, unknown>
+  estimated_hours?: number
+  billing_low?: number
+  billing_high?: number
+  estimate_confidence?: 'low' | 'medium' | 'high'
   allowAssigneePath?: boolean
 }): Promise<Task | undefined> {
   const result = await pool.query<Task>(
@@ -109,14 +123,19 @@ export async function updateTask(params: {
          END,
          github_pr_url       = COALESCE($9, github_pr_url),
          notes               = COALESCE($10, notes),
-         metadata            = COALESCE($12::jsonb, metadata)
+         metadata            = COALESCE($12::jsonb, metadata),
+         estimated_hours     = COALESCE($13, estimated_hours),
+         billing_low         = COALESCE($14, billing_low),
+         billing_high        = COALESCE($15, billing_high),
+         estimate_confidence = COALESCE($16, estimate_confidence)
      WHERE id = $1
        AND (
          project_id IN (SELECT id FROM projects WHERE owner_agent_slug = $2)
          OR ($11 AND assignee_agent_slug = $2)
        )
      RETURNING id, project_id, title, description, status, assignee_agent_slug,
-               github_pr_url, notes, metadata, created_at, updated_at`,
+               github_pr_url, notes, metadata, estimated_hours, billing_low,
+               billing_high, estimate_confidence, created_at, updated_at`,
     [
       params.task_id,
       params.owner_agent_slug,
@@ -136,6 +155,10 @@ export async function updateTask(params: {
       // is a Tier 3 security change and requires Locksmith review at PR-open.
       params.allowAssigneePath ?? false,
       params.metadata !== undefined ? JSON.stringify(params.metadata) : null,
+      params.estimated_hours ?? null,
+      params.billing_low ?? null,
+      params.billing_high ?? null,
+      params.estimate_confidence ?? null,
     ],
   )
   return result.rows[0]

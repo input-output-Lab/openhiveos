@@ -915,6 +915,10 @@ describe('TC-U3: create-project', () => {
 // TC-U4: create-task (14 tests)
 // ---------------------------------------------------------------------------
 
+
+// S16-DB-02 (#2542): Arty rule — every task requires numeric estimates.
+const estimate = { estimated_hours: 5, billing_low: 4, billing_high: 6, estimate_confidence: 'medium' as const }
+
 describe('TC-U4: create-task', () => {
   beforeEach(() => { vi.clearAllMocks() })
 
@@ -922,6 +926,8 @@ describe('TC-U4: create-task', () => {
     mockCreateTask.mockResolvedValueOnce({ authorized: true, task: stubTask })
     const result = await handleCreateTask(
       {
+        ...estimate,
+
         project_id: 1,
         title: 'Fix bug',
         description: 'A description',
@@ -935,58 +941,59 @@ describe('TC-U4: create-task', () => {
 
   it('TC-U4-2: creates task with minimal fields (project_id + title)', async () => {
     mockCreateTask.mockResolvedValueOnce({ authorized: true, task: stubTask })
-    const result = await handleCreateTask({ project_id: 1, title: 'Fix bug' }, AGENT)
+    const result = await handleCreateTask({ ...estimate, project_id: 1, title: 'Fix bug' }, AGENT)
     expect(result).toEqual(stubTask)
     expect(mockCreateTask).toHaveBeenCalledWith(expect.objectContaining({ owner_agent_slug: AGENT }))
   })
 
   it('TC-U4-3: returns error when project not owned or not found', async () => {
     mockCreateTask.mockResolvedValueOnce({ authorized: false })
-    const result = await handleCreateTask({ project_id: 1, title: 'Fix bug' }, AGENT)
+    const result = await handleCreateTask({ ...estimate, project_id: 1, title: 'Fix bug' }, AGENT)
     expect(result).toHaveProperty('error', 'not_found_or_unauthorized')
   })
 
   it('TC-U4-4: rejects project_id ≤ 0 at schema level', async () => {
-    await expect(handleCreateTask({ project_id: 0, title: 'Fix bug' }, AGENT)).rejects.toThrow()
+    await expect(handleCreateTask({ ...estimate, project_id: 0, title: 'Fix bug' }, AGENT)).rejects.toThrow()
   })
 
   it('TC-U4-5: rejects title > 500 chars at schema level', async () => {
-    await expect(handleCreateTask({ project_id: 1, title: 'x'.repeat(501) }, AGENT)).rejects.toThrow()
+    await expect(handleCreateTask({ ...estimate, project_id: 1, title: 'x'.repeat(501) }, AGENT)).rejects.toThrow()
   })
 
   it('TC-U4-6: rejects empty title at schema level', async () => {
-    await expect(handleCreateTask({ project_id: 1, title: '' }, AGENT)).rejects.toThrow()
+    await expect(handleCreateTask({ ...estimate, project_id: 1, title: '' }, AGENT)).rejects.toThrow()
   })
 
   it('TC-U4-7: rejects description > 5000 chars at schema level', async () => {
     await expect(
-      handleCreateTask({ project_id: 1, title: 'Fix bug', description: 'x'.repeat(5001) }, AGENT),
+      handleCreateTask({ ...estimate, project_id: 1, title: 'Fix bug', description: 'x'.repeat(5001) }, AGENT),
     ).rejects.toThrow()
   })
 
   it('TC-U4-8: rejects notes > 5000 chars at schema level', async () => {
     await expect(
-      handleCreateTask({ project_id: 1, title: 'Fix bug', notes: 'x'.repeat(5001) }, AGENT),
+      handleCreateTask({ ...estimate, project_id: 1, title: 'Fix bug', notes: 'x'.repeat(5001) }, AGENT),
     ).rejects.toThrow()
   })
 
   it('TC-U4-9: rejects invalid github_pr_url at schema level', async () => {
     await expect(
-      handleCreateTask({ project_id: 1, title: 'Fix bug', github_pr_url: 'not-a-url' }, AGENT),
+      handleCreateTask({ ...estimate, project_id: 1, title: 'Fix bug', github_pr_url: 'not-a-url' }, AGENT),
     ).rejects.toThrow()
   })
 
   it('TC-U4-10: rejects unknown assignee_agent_slug at schema level', async () => {
     mockIsValidAgentSlug.mockReturnValueOnce(false)
     await expect(
-      handleCreateTask({ project_id: 1, title: 'Fix bug', assignee_agent_slug: 'ghost-agent' }, AGENT),
+      handleCreateTask({ ...estimate, project_id: 1, title: 'Fix bug', assignee_agent_slug: 'ghost-agent' }, AGENT),
     ).rejects.toThrow()
   })
 
   it('TC-U4-11: accepts valid assignee_agent_slug', async () => {
     mockCreateTask.mockResolvedValueOnce({ authorized: true, task: stubTask })
     const result = await handleCreateTask(
-      { project_id: 1, title: 'Fix bug', assignee_agent_slug: 'other-agent' },
+      { ...estimate,
+ project_id: 1, title: 'Fix bug', assignee_agent_slug: 'other-agent' },
       AGENT,
     )
     expect(result).toEqual(stubTask)
@@ -994,19 +1001,20 @@ describe('TC-U4: create-task', () => {
 
   it('TC-U4-12: handles DB error from query layer', async () => {
     mockCreateTask.mockRejectedValueOnce(new Error('DB error'))
-    await expect(handleCreateTask({ project_id: 1, title: 'Fix bug' }, AGENT)).rejects.toThrow('DB error')
+    await expect(handleCreateTask({ ...estimate, project_id: 1, title: 'Fix bug' }, AGENT)).rejects.toThrow('DB error')
   })
 
   it('TC-U4-13: title at exactly 500 chars (boundary) accepted', async () => {
     mockCreateTask.mockResolvedValueOnce({ authorized: true, task: stubTask })
-    const result = await handleCreateTask({ project_id: 1, title: 'x'.repeat(500) }, AGENT)
+    const result = await handleCreateTask({ ...estimate, project_id: 1, title: 'x'.repeat(500) }, AGENT)
     expect(result).toEqual(stubTask)
   })
 
   it('TC-U4-14: accepts valid github_pr_url with HTTPS', async () => {
     mockCreateTask.mockResolvedValueOnce({ authorized: true, task: stubTask })
     const result = await handleCreateTask(
-      { project_id: 1, title: 'Fix bug', github_pr_url: 'https://github.com/org/repo/pull/42' },
+      { ...estimate,
+ project_id: 1, title: 'Fix bug', github_pr_url: 'https://github.com/org/repo/pull/42' },
       AGENT,
     )
     expect(result).toEqual(stubTask)
