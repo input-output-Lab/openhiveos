@@ -153,7 +153,7 @@ Expected response:
 ```json
 {
   "status": "ok",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "squad": "your-squad-name",
   "agents": ["agent-one"],
   "db": "connected"

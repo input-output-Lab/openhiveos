@@ -7,6 +7,35 @@ Version numbers follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.2.0] — 2026-10-30
+
+Sprint 16 — task lifecycle, typed estimates, and usage analytics. "Stop the bleeding, start capturing data."
+
+**Delivered by:** Murphy, Scout, Elizabeth (PM), Cooper (backup gate), The One (content spec)  
+**Branch:** `feat/s16-l10-lifecycle-time-reporting` → `main`
+
+### Added
+- Task lifecycle history: `task_status_history` (append-only) + `audit_log` with before/after JSONB (migration 024); `tasks.started_at/completed_at/resolution/reviewer_agent_slug`; `hive.actor` session convention
+- Typed estimates: `tasks.estimated_hours/billing_low/billing_high/estimate_confidence` + versioned `task_estimates` table (migration 025); create_task MCP tool now requires numeric estimates
+- Usage enrichment: `llm_usage` +8 columns, `llm_models`/`llm_model_aliases` registry, `v_usage_enriched` view (migration 022)
+- Versioned price list: `llm_model_prices` with single-current-row constraint + tstzrange EXCLUDE (migration 023); server-side estimated cost with `cost_source` flag (SEC-C9 v2, SEC-C11/12/13)
+- Local usage collector: VS Code chatSessions/transcripts → structured usage JSON (`src/scripts/usage-collector`)
+- Tool invocation analytics: `tool_invocations` +10 columns — session/task/project attribution, arg_keys + args_hash (raw values never stored), response_bytes (migration 026 + gateway enrichment)
+- Agent spec v1.1.0: 2-step Session Start Gate, actual-values `report_usage` template with task_id, unified review→pending-close lifecycle, explicit approver rule (Elizabeth; Nova for Elizabeth's tasks)
+
+### Fixed
+- Status drift: single `TASK_STATUSES` source of truth in `src/types.ts`; contract test + CI gate on applied schema
+- CI: dynamic migration glob loop (all migrations now apply in CI), vitest wired into CI, 4-month-stale test assertions fixed
+- 100 stuck tasks cleared: 44 closed (22 auto_closed + 22 obsolete), 65 queued for owner triage
+
+### Security
+- SEC-C9 revised: `cost_usd` optional on `/internal/usage`, server computes + flags estimated cost; `cost_source` server-owned; price table has no reader surface (SEC-C12); defined degradation (SEC-C13)
+- `tool_invocations` stores arg key names + SHA-256 hash only — raw values never persisted
+
+**[0.2.0]: https://github.com/inputoutputlabs/openhiveos/releases/tag/v0.2.0**
+
+---
+
 ## [0.1.0] — 2026-05-21
 
 First public release. The Cron Utilities registration layer completes the v0.1 feature set across four sprints.
