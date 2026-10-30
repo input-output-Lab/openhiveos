@@ -35,6 +35,9 @@ import { squadApiPool } from '../db.js'
 const SESSION_ID_REGEX = /^[a-z][a-z0-9_-]*:[^:]+:\d{13}$/
 
 // .strict() rejects any fields not listed here (SEC-C4: unknown fields rejected)
+// S17-DB-01 (#2553): new optional fields mirror migration 022. All optional —
+// legacy Bridge payloads remain valid. cost_usd stays required (SEC-C9:
+// caller-supplied cost; server-side pricing is #2554's change alone).
 const UsagePayloadSchema = z
   .object({
     session_id:            z.string().regex(SESSION_ID_REGEX),
@@ -48,6 +51,20 @@ const UsagePayloadSchema = z
     cache_read_tokens:     z.number().int().min(0).optional(),
     cache_creation_tokens: z.number().int().min(0).optional(),
     task_id:               z.number().int().positive().optional(),
+    project_id:            z.number().int().positive().optional(),
+    client_surface:        z.enum(['vscode-copilot', 'claude-code', 'bridge', 'cli', 'cron', 'api']).optional(),
+    requested_at:          z.string().datetime({ offset: true }).optional(),
+    request_id:            z.string().min(1).max(256).optional(),
+    reasoning_tokens:      z.number().int().min(0).optional(),
+    prompt_token_details:  z
+      .array(
+        z.object({
+          label:              z.string().min(1).max(128),
+          percentageOfPrompt: z.number().min(0).max(100),
+        }),
+      )
+      .max(32)
+      .optional(),
   })
   .strict()
 
@@ -59,13 +76,21 @@ const INSERT_SQL = `
   INSERT INTO llm_usage (
     session_id, loop_index, agent_slug, model, provider,
     prompt_tokens, completion_tokens, cost_usd,
-    cache_read_tokens, cache_creation_tokens, task_id
+    cache_read_tokens, cache_creation_tokens, task_id,
+    project_id, client_surface, requested_at, request_id,
+    reasoning_tokens, prompt_token_details
   ) VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, $8,
-    $9, $10, $11
+    $9, $10, $11,
+    $12, $13, $14, $15,
+    $16, $17
   )
 `
+
+// request_id (S17-DB-01) is a collector correlation key — deliberately NOT
+// UNIQUE and never mapped onto loop_index: overloading it would corrupt the
+// SEC-C6 replay guard, which keys on (session_id, loop_index) only.
 
 // ---------------------------------------------------------------------------
 // Router
@@ -124,6 +149,12 @@ internalRouter.post('/usage', async (req, res) => {
     cache_read_tokens,
     cache_creation_tokens,
     task_id,
+    project_id,
+    client_surface,
+    requested_at,
+    request_id,
+    reasoning_tokens,
+    prompt_token_details,
   } = parsed.data
 
   // Direct pool write — NOT via withReaderRole(). The ingestion endpoint
@@ -142,6 +173,12 @@ internalRouter.post('/usage', async (req, res) => {
       cache_read_tokens ?? null,
       cache_creation_tokens ?? null,
       task_id ?? null,
+      project_id ?? null,
+      client_surface ?? null,
+      requested_at ?? null,
+      request_id ?? null,
+      reasoning_tokens ?? null,
+      prompt_token_details ? JSON.stringify(prompt_token_details) : null,
     ])
 
     console.log(
