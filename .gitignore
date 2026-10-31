@@ -16,6 +16,8 @@ graphify-out/**
 # See docs/harness-config.md and provision/.env.tokens.
 harness/
 provision/.env.tokens
+provision/agents.env
+provision/dashboard.token
 
 # Dashboard package
 packages/dashboard/node_modules/
