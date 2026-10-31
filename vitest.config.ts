@@ -9,8 +9,13 @@ export default defineConfig({
     // use the global pool from src/db/client.ts. However, client.ts throws at
     // module-load time when DATABASE_URL is absent. Setting a placeholder here
     // satisfies the guard without connecting to any real database.
+    // S17-BE-01 (#2555): task-transitions.integration.test.ts uses the REAL
+    // local DB — set RUN_INTEGRATION=1 and (optionally) TEST_DATABASE_URL to
+    // point it somewhere; the real URL here wins over the placeholder.
     env: {
-      DATABASE_URL: 'postgresql://test:test@localhost:5432/test_placeholder',
+      DATABASE_URL:
+        process.env['TEST_DATABASE_URL'] ??
+        'postgresql://test:test@localhost:5432/test_placeholder',
       GEMINI_API_KEY: 'test_placeholder_key',
       GATEWAY_MODE: 'true',
       // testcontainers needs DOCKER_HOST to locate the OrbStack socket on macOS

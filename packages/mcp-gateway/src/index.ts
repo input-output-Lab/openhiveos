@@ -34,6 +34,7 @@ import {
   CallToolRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js'
 import { Gateway, resolveAgentSlug } from './gateway.js'
+import { assertDevAuthAllowed, DEV_ACTOR_SLUG } from './dev-auth.js'
 
 // ---------------------------------------------------------------------------
 // Boot-time validation (SEC-D2, SEC-D10)
@@ -48,6 +49,22 @@ if (!rawToken || rawToken.length < 64) {
   process.exit(1)
 }
 const TOKEN_BUF = Buffer.from(rawToken, 'utf8')
+
+// ---------------------------------------------------------------------------
+// MCP_GATEWAY_AUTH_DISABLED boot guard (S17-BE-06, task 2637 — Tier-3).
+// Decision logic lives in dev-auth.ts (unit-tested); this boot check fails
+// closed BEFORE listen, so a stale pm2-cached flag cannot silently re-enable
+// dev-auth in production or on a non-loopback bind.
+// ---------------------------------------------------------------------------
+const devAuth = assertDevAuthAllowed({
+  authDisabled: process.env['MCP_GATEWAY_AUTH_DISABLED'] === 'true',
+  nodeEnv: process.env['NODE_ENV'],
+  gatewayBind: process.env['GATEWAY_BIND'] ?? '127.0.0.1',
+})
+if (!devAuth.allowed) {
+  console.error(devAuth.reason)
+  process.exit(1)
+}
 
 // ---------------------------------------------------------------------------
 // Database pool — used by resolveAgentSlug for per-request identity (ARCH-021)
@@ -270,10 +287,13 @@ async function resolveAgentFromBearer(
   res: Response,
   next: NextFunction,
 ): Promise<void> {
-  // Development mode: skip auth if MCP_GATEWAY_AUTH_DISABLED is set
+  // Development mode: skip auth if MCP_GATEWAY_AUTH_DISABLED is set.
+  // Boot guard above already ensured this is loopback + non-production.
+  // S17-BE-06: dev callers map to a NON-PRIVILEGED identity. The old value
+  // 'elizabeth' made every unauthenticated local call the APPROVER.
   const authDisabled = process.env['MCP_GATEWAY_AUTH_DISABLED'] === 'true'
   if (authDisabled) {
-    res.locals['agentSlug'] = 'elizabeth'
+    res.locals['agentSlug'] = DEV_ACTOR_SLUG
     next()
     return
   }

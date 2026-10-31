@@ -1,7 +1,9 @@
 import { z } from 'zod'
 import { TASK_STATUSES } from '../types.js'
-import { updateTask } from '../db/queries/tasks.js'
+import { updateTask, getTaskForActor } from '../db/queries/tasks.js'
+import { withActor } from '../db/client.js'
 import { isValidAgentSlug } from '../squad/manifest.js'
+import { assertTransition } from './task-transitions.js'
 
 export const updateTaskSchema = z.object({
   task_id: z.number().int().positive(),
@@ -21,6 +23,15 @@ export const updateTaskSchema = z.object({
   // SEC-22: validated against squad.manifest.json — prevents raw PG 23503 FK
   // violations from surfacing to the caller. Established pattern: isValidAgentSlug.
   assignee_agent_slug: z
+    .string()
+    .refine(isValidAgentSlug, { message: 'Unknown agent slug' })
+    .optional(),
+  // SEC-22: validated against squad.manifest.json — prevents raw PG 23503 FK
+  // violations from surfacing to the caller. OWNER-ONLY: reassigning the
+  // reviewer re-routes review authority — Locksmith BLOCK fix (2026-10-30,
+  // memory 3308): this field was previously absent from the schema, so zod
+  // silently dropped it and the D6 'owner may reassign' claim was false.
+  reviewer_agent_slug: z
     .string()
     .refine(isValidAgentSlug, { message: 'Unknown agent slug' })
     .optional(),
@@ -68,6 +79,7 @@ export async function handleUpdateTask(input: UpdateTaskInput, agentSlug: string
     parsed.description !== undefined ||
     parsed.unassign !== undefined ||
     parsed.assignee_agent_slug !== undefined ||
+    parsed.reviewer_agent_slug !== undefined ||
     parsed.github_pr_url !== undefined ||
     parsed.notes !== undefined ||
     parsed.metadata !== undefined ||
@@ -78,28 +90,120 @@ export async function handleUpdateTask(input: UpdateTaskInput, agentSlug: string
 
   const allowAssigneePath = !ownerOnlyFieldsPresent
 
-  // M3 gate (ARCH-023 — SEC-21 extension): On the assignee path, `done` is not
-  // a valid target status. Assignees submit `pending-close`; only the project
-  // owner may approve the pending-close → done transition. The DB does not
-  // enforce status-value scope on the assignee path independently — this gate
-  // is the only enforcement layer. Changes here are Tier 3 / require Locksmith review.
-  if (allowAssigneePath && parsed.status === 'done') {
-    return {
-      error: 'not_found_or_unauthorized',
-      message: 'Task not found or you are not authorized to update it.',
+  // S17-BE-01 (#2555): FULL transition gate — replaces the M3-only check.
+  // Locksmith Tier-3 ruling (memory 3302, properties P1–P5):
+  //   1. Resolve the caller's visibility on this task (owner OR assignee;
+  //      a non-visible caller gets the same opaque not_found error as before
+  //      — no existence oracle for strangers).
+  //   2. Only a STATUS change passes through the transition matrix. Non-status
+  //      writes remain owner-only via the field gate above.
+  //   3. assertTransition resolves the caller's role (owner/assignee/reviewer/
+  //      approver) and validates from→to against the ruling's fail-closed
+  //      table. Rejections are opaque to the caller (not_found) but logged.
+  //   4. The DB re-asserts the fetched from-state atomically (expectedFromStatus)
+  //      — closing the fetch-then-update TOCTOU race.
+  // 'system' identity is rejected inside assertTransition (P3): the cron path
+  // for #2551 asserts its role server-side, never via this input.
+  let expectedFromStatus: string | undefined
+  // Hoisted so the row-gate flags below can read the matrix resolution even
+  // though assertTransition only runs for status writes.
+  let verdict: ReturnType<typeof assertTransition> | undefined
+  if (parsed.status !== undefined) {
+    const current = await getTaskForActor(parsed.task_id, agentSlug)
+    if (!current) {
+      return {
+        error: 'not_found_or_unauthorized',
+        message: 'Task not found or you are not authorized to update it.',
+      }
+    }
+
+    // M3 gate (ARCH-023) is FULLY SUBSUMED by the transition matrix (S17-BE-01):
+    // 'done' is only reachable as approver/system from pending-close, and
+    // assertTransition resolves the caller's real role (owner of the project may
+    // approve only if elizabeth/nova rule applies). The old allowAssigneePath-
+    // based early guard misfired for owners making bare status requests —
+    // allowAssigneePath is a FIELD gate, not a role determination. The matrix
+    // is the single enforcement point for status transitions.
+
+    const v = assertTransition(
+      {
+        task: {
+          status: current.status,
+          assignee_agent_slug: current.assignee_agent_slug,
+          reviewer_agent_slug: current.reviewer_agent_slug,
+          project_owner_agent_slug: current.project_owner_agent_slug,
+          metadata_domain:
+            typeof current.metadata.domain === 'string' ? current.metadata.domain : undefined,
+        },
+        callerAgentSlug: agentSlug,
+      },
+      parsed.status,
+    )
+    verdict = v
+    if (!v.ok) {
+      return {
+        error: 'invalid_transition',
+        message: v.reason,
+      }
+    }
+
+    // FIELD-SMUGGLING GATE (Locksmith BLOCK fix, memory 3308): the row gate
+    // admits reviewer/approver rows for the transition it just authorized —
+    // but those roles may NOT carry owner-only fields in the same request.
+    // Without this, a reviewer could overwrite metadata/domain mid-transition
+    // (live-proven exploit: scout + {status:'pending-close', metadata:{...}}).
+    // Role carve-out per the ruling: reviewer may also write `notes` (review
+    // feedback) — nothing else. Approver is status-ONLY. Owner/assignee roles
+    // are governed by the field gate below, not this gate.
+    if (v.role === 'reviewer' || v.role === 'approver') {
+      // Owner-only fields minus `notes` (the reviewer carve-out). Approver:
+      // ANY owner-only field present is forbidden — status only.
+      const ownerFieldsExceptNotes =
+        ownerOnlyFieldsPresent && parsed.notes === undefined
+      const forbidden =
+        v.role === 'approver' ? ownerOnlyFieldsPresent : ownerFieldsExceptNotes
+      if (forbidden) {
+        return {
+          error: 'invalid_transition',
+          message: `The ${v.role} role may only write the status (and notes for reviewers) during a transition. Owner-only fields require the project owner.`,
+        }
+      }
+    }
+
+    // Only guard from-state when the status actually changes (same-status
+    // writes like a no-op status update would deadlock otherwise).
+    if (parsed.status !== current.status) {
+      expectedFromStatus = current.status
     }
   }
 
-  const result = await updateTask({
-    task_id: parsed.task_id,
-    owner_agent_slug: agentSlug,
-    allowAssigneePath,
+  // S17-BE-01 (#2555, P5): every write runs inside withActor so migration
+  // 024's audit triggers attribute task_status_history + audit_log rows to
+  // the real caller. The transaction client is threaded into updateTask —
+  // SET LOCAL is connection-scoped, so the UPDATE must run on the SAME
+  // connection where hive.actor was set (E2E-caught bug otherwise).
+  //
+  // Row-gate widening: the matrix resolved the caller's role — a reviewer
+  // (scout/locksmith/clarence/silas per domain) is usually neither project
+  // owner nor assignee, so the DB row-gate must admit them for the status
+  // write it just authorized. Same trust level as expectedFromStatus: the
+  // matrix verdict IS the authorization.
+  const result = await withActor(agentSlug, (tx) =>
+    updateTask({
+      client: tx,
+      task_id: parsed.task_id,
+      owner_agent_slug: agentSlug,
+      allowAssigneePath,
+      ...(verdict?.ok ? { callerIsReviewer: verdict.role === 'reviewer' } : {}),
+      ...(verdict?.ok ? { callerIsApprover: verdict.role === 'approver' } : {}),
+      ...(expectedFromStatus !== undefined ? { expectedFromStatus } : {}),
     ...(parsed.project_id !== undefined ? { project_id: parsed.project_id } : {}),
     ...(parsed.title !== undefined ? { title: parsed.title } : {}),
     ...(parsed.description !== undefined ? { description: parsed.description } : {}),
     ...(parsed.status !== undefined ? { status: parsed.status } : {}),
     ...(parsed.unassign !== undefined ? { unassign: parsed.unassign } : {}),
     ...(parsed.assignee_agent_slug !== undefined ? { assignee_agent_slug: parsed.assignee_agent_slug } : {}),
+    ...(parsed.reviewer_agent_slug !== undefined ? { reviewer_agent_slug: parsed.reviewer_agent_slug } : {}),
     ...(parsed.github_pr_url !== undefined ? { github_pr_url: parsed.github_pr_url } : {}),
     ...(parsed.notes !== undefined ? { notes: parsed.notes } : {}),
     ...(parsed.metadata !== undefined ? { metadata: parsed.metadata } : {}),
@@ -107,7 +211,8 @@ export async function handleUpdateTask(input: UpdateTaskInput, agentSlug: string
     ...(parsed.billing_low !== undefined ? { billing_low: parsed.billing_low } : {}),
     ...(parsed.billing_high !== undefined ? { billing_high: parsed.billing_high } : {}),
     ...(parsed.estimate_confidence !== undefined ? { estimate_confidence: parsed.estimate_confidence } : {}),
-  })
+    })
+  )
   if (!result) {
     return {
       error: 'not_found_or_unauthorized',
