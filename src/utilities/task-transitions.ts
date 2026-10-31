@@ -38,6 +38,15 @@ export type ActorRole = 'owner' | 'assignee' | 'reviewer' | 'approver' | 'system
 // Everything else is rejected. Notably: no skips (wip→done, review→done,
 // wip→pending-close), no assignee back-transitions (review→wip,
 // pending-close→review), no assignee→done (P1).
+//
+// The {review → rework, system} row (S17-BE-02 #2551, Locksmith ruling
+// thought 1144 / memory 3338, 2026-10-31) replaces the L10-proposed
+// review→triage move, which was DENIED: triage is an inbound-only intake
+// status (ARCH-024 / migration 019) that board-facing queries exclude —
+// routing live tasks there would make them invisible. The system rework row
+// may ONLY fire through assertSystemTransition() below, which structurally
+// enforces: target = rework, task in review ≥ REWORK_REROUTE_DAYS, and
+// assignee IS NULL. It is unreachable from update_task (P3).
 export const TRANSITIONS: ReadonlyArray<{
   from: TaskStatus
   to: TaskStatus
@@ -49,11 +58,17 @@ export const TRANSITIONS: ReadonlyArray<{
   { from: 'wip', to: 'review', role: 'owner' },
   { from: 'review', to: 'pending-close', role: 'reviewer' },
   { from: 'review', to: 'rework', role: 'reviewer' },
+  { from: 'review', to: 'rework', role: 'system' },
   { from: 'rework', to: 'wip', role: 'assignee' },
   { from: 'rework', to: 'wip', role: 'owner' },
   { from: 'pending-close', to: 'done', role: 'approver' },
   { from: 'pending-close', to: 'done', role: 'system' },
 ]
+
+// Aging policy (L10 2026-10-29, #2551): review-age threshold at which the
+// system may reroute an UNASSIGNED review task to rework. Below this age the
+// system row must never fire — assertSystemTransition rejects it.
+export const REWORK_REROUTE_DAYS = 14
 
 // ---------------------------------------------------------------------------
 // Domain defaults for reviewer resolution (ruling P2: fail closed)
@@ -195,4 +210,68 @@ export function assertTransition(
     return { ok: false, reason: `Transition ${ctx.task.status} → ${target} as ${role.role} is not permitted by the state machine.` }
   }
   return role
+}
+
+// ---------------------------------------------------------------------------
+// assertSystemTransition — the ONLY entry point for the system actor's two
+// cron transitions (S17-BE-02 #2551; Locksmith ruling thought 1144).
+//
+// handleUpdateTask can never reach the system rows: resolveActorRole rejects
+// callerAgentSlug 'system' (P3). This function is the server-side complement —
+// called in-process by the aging cron handler, never from request paths.
+//
+// Two transitions, each with structural preconditions that are part of the
+// authorization (fail-closed: a missing precondition rejects):
+//
+//   review  → rework    only when age ≥ REWORK_REROUTE_DAYS AND the task is
+//                       unassigned (the L10 policy: unassigned work goes back
+//                       to the queue; rework→wip is then an owner path).
+//   pending-close → done only when age ≥ AUTOCLOSE_DAYS. Resolution is set by
+//                       the caller's DB layer ('auto_closed') — history rows
+//                       attribute the transition to 'system:auto_close'.
+// ---------------------------------------------------------------------------
+export const AUTOCLOSE_DAYS = 30
+
+export type SystemTransitionInput = {
+  status: TaskStatus
+  assignee_agent_slug: string | null
+  /** How long the task has sat in its current status, in whole days. */
+  daysInStatus: number
+}
+
+export function assertSystemTransition(
+  task: SystemTransitionInput,
+  target: TaskStatus,
+): { ok: true; role: 'system' } | { ok: false; reason: string } {
+  // The system row only exists for these two edges — anything else is a bug
+  // in the caller, not a policy rejection. Fail loud so it gets fixed.
+  if (
+    !TRANSITIONS.some((t) => t.from === task.status && t.to === target && t.role === 'system')
+  ) {
+    throw new Error(
+      `[task-transitions] assertSystemTransition: no system row for ${task.status} → ${target}`,
+    )
+  }
+
+  if (task.status === 'review' && target === 'rework') {
+    if (task.assignee_agent_slug !== null) {
+      return { ok: false, reason: 'System rework reroute requires an unassigned task.' }
+    }
+    if (task.daysInStatus < REWORK_REROUTE_DAYS) {
+      return {
+        ok: false,
+        reason: `System rework reroute requires ${String(REWORK_REROUTE_DAYS)} days in review (task is at ${String(task.daysInStatus)}).`,
+      }
+    }
+    return { ok: true, role: 'system' }
+  }
+
+  // pending-close → done
+  if (task.daysInStatus < AUTOCLOSE_DAYS) {
+    return {
+      ok: false,
+      reason: `System auto-close requires ${String(AUTOCLOSE_DAYS)} days in pending-close (task is at ${String(task.daysInStatus)}).`,
+    }
+  }
+  return { ok: true, role: 'system' }
 }
