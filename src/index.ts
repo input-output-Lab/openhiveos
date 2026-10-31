@@ -53,6 +53,7 @@ import type { ToolHandler } from './workers/tool-dispatcher.js'
 import type { RegisteredToolName } from './utilities/tool-registry.js'
 import { triggerWorkflowHandler } from './workers/handlers/trigger-workflow.js'
 import { taskAgingHandler } from './workers/handlers/task-aging.js'
+import { worklogDeriveHandler } from './workers/handlers/worklog-derive.js'
 import { runSopIngest } from './sops/ingest.js'
 
 await connectDb()           // Step 2
@@ -273,6 +274,7 @@ await server.connect(transport) // Step 6
 const cronHandlers: Map<RegisteredToolName, ToolHandler> = new Map([
   ['trigger_workflow', triggerWorkflowHandler],
   ['task_aging', taskAgingHandler], // S17-BE-02 #2551 — system-actor-only handler
+  ['worklog_derive', worklogDeriveHandler], // S17-BE-04 #2552 — system-actor-only handler
 ])
 const dispatcher = new ToolDispatcher(pool, cronHandlers)
 const worker = new CronWorker(pool, dispatcher)

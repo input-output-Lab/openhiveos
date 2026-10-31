@@ -52,6 +52,12 @@ const MIGRATIONS = [
   '020_task_metadata.sql',
   '024_task_lifecycle.sql',
   '025_task_estimates.sql',
+  // S16-DB-03 enrichment (session_id/task_id/actor_type on tool_invocations)
+  // + S17-BE-04 worklogs (task_worklogs, session-called index, derivation view)
+  // 017 creates tool_invocations itself (its reader GRANT is stripped above).
+  '017_tool_invocations.sql',
+  '026_tool_invocations_enrichment.sql',
+  '027_task_worklogs.sql',
 ]
 
 /**
@@ -229,4 +235,53 @@ export async function insertTask(
   )
 
   return taskId
+}
+
+/**
+ * Insert a tool_invocations row (the derivation source). Timestamps are
+ * passed as ISO strings so fixtures control the session clock exactly.
+ */
+export async function insertInvocation(
+  pool: Pool,
+  overrides: {
+    agent_slug?: string
+    tool_name?: string
+    called_at?: string // ISO timestamp
+    duration_ms?: number | null
+    success?: boolean
+    session_id?: string | null
+    task_id?: number | null
+    project_id?: number | null
+    client_surface?: string | null
+    actor_type?: string | null
+  } = {},
+): Promise<number> {
+  const {
+    agent_slug = 'test-agent',
+    tool_name = 'query_tasks',
+    called_at = new Date().toISOString(),
+    duration_ms = 1_000,
+    success = true,
+    session_id = null,
+    task_id = null,
+    project_id = null,
+    client_surface = 'vscode-copilot',
+    actor_type = 'agent',
+  } = overrides
+
+  const result = await pool.query<{ id: number }>(
+    `INSERT INTO tool_invocations
+       (agent_slug, tool_name, transport, source, called_at, duration_ms, success,
+        session_id, task_id, project_id, client_surface, actor_type)
+     VALUES ($1, $2, 'stdio', 'gateway', $3::timestamptz, $4, $5, $6, $7, $8, $9, $10)
+     RETURNING id`,
+    [agent_slug, tool_name, called_at, duration_ms, success, session_id, task_id, project_id, client_surface, actor_type],
+  )
+  return result.rows[0]!.id
+}
+
+/** Delete all tool invocations + worklogs between tests. */
+export async function cleanInvocations(pool: Pool): Promise<void> {
+  await pool.query(`DELETE FROM task_worklogs`)
+  await pool.query(`DELETE FROM tool_invocations`)
 }
