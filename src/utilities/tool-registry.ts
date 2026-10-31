@@ -40,6 +40,9 @@ export const REGISTERED_TOOL_NAMES = [
   'update_cron',
   // Pipeline Trigger (multi-agent-pipeline runner on port 3010)
   'trigger_workflow',
+  // Task aging/escalation cron (S17-BE-02 #2551) — cron-dispatcher-only,
+  // never registered via server.registerTool (P3: system path, not agent-callable)
+  'task_aging',
   // Ethos Utilities (ARCH-018 S8-03)
   'get_company_ethos',
   // LLM Usage Reporting (ARCH-015)

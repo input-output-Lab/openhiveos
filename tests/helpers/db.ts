@@ -44,6 +44,14 @@ const MIGRATIONS = [
   // CREATE ROLE IF NOT EXISTS (PG16+ syntax). We connect as superuser in the
   // testcontainer anyway, so role isolation is not required for tests.
   '008_sops_ingest_columns.sql',
+  // S16/S17 lifecycle chain: task-aging tests need 024's lifecycle columns,
+  // history + audit triggers, and 025's estimate columns.
+  '014_pending_close_status.sql',
+  '015_external_task_links.sql',
+  '019_triage_status.sql',
+  '020_task_metadata.sql',
+  '024_task_lifecycle.sql',
+  '025_task_estimates.sql',
 ]
 
 /**
@@ -63,6 +71,8 @@ export interface TestDb {
   container: StartedPostgreSqlContainer
   /** Remove all cron rows. Leaves agents and projects intact. */
   cleanCrons: () => Promise<void>
+  /** Remove all tasks (status history + audit rows cascade). */
+  cleanTasks: () => Promise<void>
   teardown: () => Promise<void>
 }
 
@@ -103,6 +113,11 @@ export async function createTestDb(): Promise<TestDb> {
       await pool.query(`DELETE FROM crons`)
     },
 
+    cleanTasks: async () => {
+      // tasks cascade to task_status_history / audit_log / external_task_links.
+      await pool.query(`DELETE FROM tasks`)
+    },
+
     teardown: async () => {
       await pool.end()
       await container.stop()
@@ -140,4 +155,78 @@ export async function insertCron(
     [projectId, schedule, tool_name, payload ? JSON.stringify(payload) : null, status],
   )
   return result.rows[0]!.id
+}
+
+/**
+ * Seed an additional agent (slug + display name). Synthetic token material —
+ * auth is not under test here. Idempotent.
+ */
+export async function insertAgent(pool: Pool, slug: string, displayName: string): Promise<void> {
+  await pool.query(
+    `INSERT INTO agents (slug, display_name, token_hash, token_salt)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (slug) DO NOTHING`,
+    [slug, displayName, `hash-${slug}-test`, `salt-${slug}-test`],
+  )
+}
+
+/**
+ * Seed a task with full lifecycle control for aging tests.
+ *
+ * `statusSince` backdates updated_at AND the task_status_history row so the
+ * days-in-status clock is deterministic without fake timers (the fixture
+ * writes history directly at the backdated time instead of relying on the
+ * NOW()-based trigger).
+ */
+export async function insertTask(
+  pool: Pool,
+  overrides: {
+    project_id?: number
+    title?: string
+    status?: 'todo' | 'wip' | 'review' | 'pending-close' | 'rework' | 'done'
+    assignee_agent_slug?: string | null
+    reviewer_agent_slug?: string | null
+    metadata?: Record<string, unknown>
+    /** SQL interval expression backdating updated_at + history, e.g. "NOW() - interval '20 days'". */
+    statusSince?: string
+  } = {},
+): Promise<number> {
+  const {
+    project_id,
+    title = 'Test Task',
+    status = 'review',
+    assignee_agent_slug = null,
+    reviewer_agent_slug = null,
+    metadata = {},
+    statusSince = 'NOW()',
+  } = overrides
+
+  let projectId = project_id
+  if (projectId === undefined) {
+    const proj = await pool.query<{ id: number }>(`SELECT id FROM projects WHERE slug = 'test-project'`)
+    projectId = proj.rows[0]!.id
+  }
+
+  const result = await pool.query<{ id: number }>(
+    `INSERT INTO tasks (project_id, title, status, assignee_agent_slug, reviewer_agent_slug, metadata,
+                        estimated_hours, billing_low, billing_high, estimate_confidence)
+     VALUES ($1, $2, $3, $4, $5, $6, 1.0, 1.0, 2.0, 'low')
+     RETURNING id`,
+    [projectId, title, status, assignee_agent_slug, reviewer_agent_slug, JSON.stringify(metadata)],
+  )
+  const taskId = result.rows[0]!.id
+
+  // Creation history entry at the backdated time (the INSERT itself is not
+  // trigger-tracked; this mirrors the API path's history semantics).
+  // NOTE: the tasks_set_updated_at trigger (migration 002) force-bumps
+  // updated_at on every UPDATE, so the age clock the scan actually reads is
+  // task_status_history — backdating history is what matters; we also set
+  // updated_at for row-level realism (it will read back as the UPDATE time).
+  await pool.query(
+    `INSERT INTO task_status_history (task_id, from_status, to_status, changed_by, changed_at)
+     VALUES ($1, NULL, $2, 'test-fixture', ${statusSince})`,
+    [taskId, status],
+  )
+
+  return taskId
 }
