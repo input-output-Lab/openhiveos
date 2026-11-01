@@ -38,6 +38,7 @@ import { handleQueryProjects, queryProjectsSchema } from './utilities/query-proj
 import { handleGetProjectBoard, getProjectBoardSchema } from './utilities/get-project-board.js'
 import { handleCreateTask, createTaskSchema } from './utilities/create-task.js'
 import { handleUpdateTask, updateTaskSchema } from './utilities/update-task.js'
+import { handleLogTime, logTimeSchema } from './utilities/log-time.js'
 import { handleQueryTasks, queryTasksSchema } from './utilities/query-tasks.js'
 import { handleAdvanceSprint, advanceSprintSchema } from './utilities/advance-sprint.js'
 import { handleQuerySprints, querySprintsSchema } from './utilities/query-sprints.js'
@@ -193,6 +194,12 @@ server.registerTool('create_task', { description: 'Create a new task under a pro
 server.registerTool('update_task', { description: 'Update a task status, assignee, notes, or GitHub PR URL. Valid statuses: todo → wip → review → done | rework. The calling agent must own the parent project. Pass project_id to reassign the task to a different project (target project must also be owned by the calling agent).', inputSchema: updateTaskSchema.shape }, async (args, extra) => {
   const slug = resolveCallSlug(extra)
   return { content: [{ type: 'text' as const, text: JSON.stringify(await handleUpdateTask(args, slug)) }] }
+})
+
+// log_time — write, requires agentSlug (assignee or project owner only; S17-BE-03 #2557)
+server.registerTool('log_time', { description: 'Log time spent on a task. Only the task assignee or the project owner may log time. Minutes may be fractional (max 1440 per entry). worked_on defaults to today (UTC), must not be in the future, and may be at most 90 days back. Category is required (DA, UX, FE, BE, QA, DO, RI, PM).', inputSchema: logTimeSchema.shape }, async (args, extra) => {
+  const slug = resolveCallSlug(extra)
+  return { content: [{ type: 'text' as const, text: JSON.stringify(await handleLogTime(args, slug)) }] }
 })
 
 // query_tasks — read, requires agentSlug for implicit project scope guard

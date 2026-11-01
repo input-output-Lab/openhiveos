@@ -58,6 +58,7 @@ const MIGRATIONS = [
   '017_tool_invocations.sql',
   '026_tool_invocations_enrichment.sql',
   '027_task_worklogs.sql',
+  '028_task_worklogs_human.sql',
 ]
 
 /**
