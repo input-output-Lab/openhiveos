@@ -1,0 +1,15 @@
+{
+  "$comment": "S17-OPS-03 (#2572): explicit mapping from OpenHiveOS llm_models.canonical_slug to LiteLLM model DB keys (https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json). The LiteLLM DB has no exact-match keys for our slugs, so every mapping is explicit and reviewable. Do NOT map to github_copilot/* rows — those carry Copilot-specific billing, not vendor list prices. Units: LiteLLM prices are USD per token; ours are USD per MTok (x1e6).",
+  "source_url": "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json",
+  "mapping": {
+    "z-ai/glm-5.3-flashx": ["zai/glm-5.3-flashx", "bigmodel/glm-5.3-flashx"],
+    "z-ai/glm-5.3-flash": ["zai/glm-5.3-flash"],
+    "z-ai/glm-4.7": ["zai/glm-4.7"],
+    "z-ai/glm-4.6": ["zai/glm-4.6"],
+    "anthropic/claude-opus-5.5": ["claude-opus-5-5", "anthropic.claude-opus-5-5"],
+    "anthropic/claude-sonnet-4-5": ["claude-sonnet-4-5", "anthropic.claude-sonnet-4-5-20250929-v1:0"],
+    "anthropic/claude-haiku-4.5": ["claude-haiku-4-5"],
+    "anthropic/claude-haiku-5.5": ["claude-haiku-5-5"],
+    "anthropic/claude-sonnet-4.6": ["claude-sonnet-4-6", "anthropic.claude-sonnet-4-6"]
+  }
+}
