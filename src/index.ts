@@ -39,6 +39,8 @@ import { handleGetProjectBoard, getProjectBoardSchema } from './utilities/get-pr
 import { handleCreateTask, createTaskSchema } from './utilities/create-task.js'
 import { handleUpdateTask, updateTaskSchema } from './utilities/update-task.js'
 import { handleLogTime, logTimeSchema } from './utilities/log-time.js'
+import { handleRegisterModel, registerModelSchema } from './utilities/register-model.js'
+import { handleAddModelAlias, addModelAliasSchema } from './utilities/add-model-alias.js'
 import { handleQueryTasks, queryTasksSchema } from './utilities/query-tasks.js'
 import { handleAdvanceSprint, advanceSprintSchema } from './utilities/advance-sprint.js'
 import { handleQuerySprints, querySprintsSchema } from './utilities/query-sprints.js'
@@ -196,10 +198,26 @@ server.registerTool('update_task', { description: 'Update a task status, assigne
   return { content: [{ type: 'text' as const, text: JSON.stringify(await handleUpdateTask(args, slug)) }] }
 })
 
-// log_time — write, requires agentSlug (assignee or project owner only; S17-BE-03 #2557)
+// log_time — write, requires agentSlug (assignee or project owner only; S17
+// -BE-03 #2557)
 server.registerTool('log_time', { description: 'Log time spent on a task. Only the task assignee or the project owner may log time. Minutes may be fractional (max 1440 per entry). worked_on defaults to today (UTC), must not be in the future, and may be at most 90 days back. Category is required (DA, UX, FE, BE, QA, DO, RI, PM).', inputSchema: logTimeSchema.shape }, async (args, extra) => {
   const slug = resolveCallSlug(extra)
   return { content: [{ type: 'text' as const, text: JSON.stringify(await handleLogTime(args, slug)) }] }
+})
+
+// register_model — S17-BE-05 (#2573): registry expansion. Bearer auth = agent
+// identity IS the authorization; every call audited via tool_invocations.
+server.registerTool('register_model', { description: 'Register a new LLM model in the cost-estimation registry. Creates the canonical model row plus optional aliases atomically. Idempotent on canonical_slug — re-registering returns the existing row and tops up missing aliases. canonical_slug must be vendor/model lowercase form (e.g. z-ai/glm-5.3-flashx). Registered models make cost estimation resolve instead of falling to cost_source unknown.', inputSchema: registerModelSchema.shape }, async (args, extra) => {
+  const slug = resolveCallSlug(extra)
+  return { content: [{ type: 'text' as const, text: JSON.stringify(await handleRegisterModel(args, slug)) }] }
+})
+
+// add_model_alias — S17-BE-05 (#2573): bind a new surface form to a known
+// canonical model (normalization gap, #2553 ruling). Alias re-pointing is an
+// explicit error, never a silent rewrite of cost attribution.
+server.registerTool('add_model_alias', { description: 'Add an alias for an already-registered LLM model — use when a known model appears under a new surface form (e.g. a new provider prefix). Fails explicitly if the canonical_slug is not registered, the alias is bound to a different model, or the alias already points at this model. Aliases are never silently re-pointed.', inputSchema: addModelAliasSchema.shape }, async (args, extra) => {
+  const slug = resolveCallSlug(extra)
+  return { content: [{ type: 'text' as const, text: JSON.stringify(await handleAddModelAlias(args, slug)) }] }
 })
 
 // query_tasks — read, requires agentSlug for implicit project scope guard
