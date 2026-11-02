@@ -74,10 +74,11 @@
 
 2. **Integration Debt (Test Design):** Test suite uses deprecated Testcontainers pattern; production now 100% PM2-based. Architecture misalignment means integration tests cannot run. Remediation: refactor fixtures to spawn PM2 processes (3–4 days, Scout + Murphy).
 
-2. **JWT constant-time verification** — src/auth/token-verification.ts exists but timing-attack surface unknown
-   - Impact: Potential timing attack on token comparison
-   - Severity: 🟡 P2 (security review pending)
+2. **JWT constant-time verification** — src/auth/token-comparison.ts implements timingSafeEqual with byte-length guard; timing-attack surface verified closed
+   - Impact: Potential timing attack on token comparison — RESOLVED 2026-11-02 (TD-S12-02 closed by Locksmith)
+   - Severity: ✅ Closed (was 🟡 P2; security review complete — see S15-SEC-02 / task 1810)
    - Owner: Locksmith (security sign-off required)
+   - Closure evidence: verdict PASS 2026-11-02 (all 4 auth paths verified using timingSafeEqual); original HMAC sign-off Locksmith 2026-06-14 (TASK-1770, APPROVED FOR MERGE)
    - Status: TBD (scheduled for TASK-1770 webhook audit, same agent)
    - Business Cost: Low if confirmed safe; ~2-4 hours if remediation needed
 
