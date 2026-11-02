@@ -124,12 +124,11 @@ describe('S17-BE-01: rejections (ruling P1–P4 fail-closed)', () => {
   })
 
   it('P2: explicit self-referential reviewer AND caller-is-reviewer collision is blocked', () => {
-    // If reviewer = silas and silas is ALSO the assignee — impossible here since
-    // assignee=murphy, but the direct collision case: caller IS the explicit
-    // reviewer and also the owner (owner reviewing own project's task while
-    // assigned to nobody) — the reviewer role requires NOT assignee and NOT
-    // owner is allowed to review (owner can gate), so test the true collision:
-    // caller = explicit reviewer = assignee.
+    // Direct collision case: caller = explicit reviewer = assignee.
+    // resolveReviewer ignores a self-referential reviewer (P2), so silas falls
+    // to the domain/owner fallback — either way caller is the assignee and the
+    // self-review block rejects. (Owner-as-reviewer is permitted since the
+    // 2026-11-02 fix, but an assignee caller is still always rejected.)
     const r = assertTransition(
       ctx({ status: 'review', assignee: 'silas', reviewer: 'silas', caller: 'silas' }),
       'pending-close',
@@ -142,6 +141,23 @@ describe('S17-BE-01: rejections (ruling P1–P4 fail-closed)', () => {
     expect(resolveReviewer(c)).toBe('elizabeth') // project owner, NOT rocket
     const r = assertTransition(c, 'pending-close')
     expect(r.ok).toBe(false) // rocket is neither owner/assignee nor resolved reviewer
+  })
+
+  it('owner-as-reviewer: owner may gate review → pending-close (fallback reachable, 2026-11-02 fix)', () => {
+    // resolveReviewer fail-closes to the project owner. Before the fix, the
+    // reviewer branch required !isOwner, deadlocking tasks with no explicit
+    // reviewer and no domain (real case: 1805/1807 stuck in review forever).
+    const c = ctx({ status: 'review', assignee: 'murphy', domain: undefined, caller: 'elizabeth' })
+    expect(resolveReviewer(c)).toBe('elizabeth')
+    const r = assertTransition(c, 'pending-close')
+    expect(r.ok).toBe(true)
+    expect(r.ok && r.role).toBe('reviewer')
+  })
+
+  it('owner-as-reviewer: owner can never review a task assigned to herself (self-review)', () => {
+    const c = ctx({ status: 'review', assignee: 'elizabeth', domain: undefined, caller: 'elizabeth' })
+    const r = assertTransition(c, 'pending-close')
+    expect(r.ok).toBe(false)
   })
 
   it('P3: system identity is rejected as an update_task caller', () => {

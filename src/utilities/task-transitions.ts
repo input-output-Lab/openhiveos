@@ -131,7 +131,11 @@ export function resolveActorRole(ctx: TransitionContext, target: TaskStatus): Ro
 
   // Reviewer transitions: review → pending-close | rework
   if (task.status === 'review' && (target === 'pending-close' || target === 'rework')) {
-    if (!isOwner && !isAssignee && callerAgentSlug === resolvedReviewer) {
+    // Owner-as-reviewer fix (2026-11-02): resolveReviewer fail-closes to the
+    // project owner, but `!isOwner` here made that fallback unreachable —
+    // unreviewed-owner tasks (no explicit reviewer, no domain) could never
+    // leave review. Self-review (assignee) blocks are unchanged below.
+    if (!isAssignee && callerAgentSlug === resolvedReviewer) {
       return { ok: true, role: 'reviewer' }
     }
     // P2 anti-patterns get specific rejections for audit clarity:
