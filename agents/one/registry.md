@@ -1,8 +1,18 @@
 # Identity Vault — Agent Registry
 
 > Maintained by: The One  
-> Last updated: April 25, 2026  
+> Last updated: November 2, 2026 (first live session — manifest 1.2.0 registration)  
 > Source of truth for every active agent in the Factory.
+
+---
+
+## Registration Layer Note
+
+As of 2026-11-02 the Factory has TWO identity layers:
+1. **The Vault (this file)** — constitutional identity: Seats, souls, Complements, GWC. Maintained by The One.
+2. **squad.manifest.json (1.2.0)** — operational identity: slugs, tokens, tool surface. Maintained by Cooper; sealed and Locksmith-signed.
+
+`one` and `zero` are now registered in BOTH layers. The Vault records seats; the manifest records capabilities. Neither substitutes for the other.
 
 ---
 

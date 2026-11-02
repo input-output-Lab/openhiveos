@@ -36,6 +36,9 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      - name: Agent protocol sync
+        run: npm run agents:check
+
   migration-validation:
     name: Migration validation
     runs-on: ubuntu-latest
