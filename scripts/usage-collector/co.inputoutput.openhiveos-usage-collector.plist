@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- S17-OPS-02 (#2571) — daily usage collector. Local-only file, NOT in git.
+     Install:  cp scripts/usage-collector/co.inputoutput.openhiveos-usage-collector.plist ~/Library/LaunchAgents/
+               launchctl load ~/Library/LaunchAgents/co.inputoutput.openhiveos-usage-collector.plist
+     Verify:   launchctl list | grep openhiveos-usage
+     Unload:   launchctl unload ~/Library/LaunchAgents/co.inputoutput.openhiveos-usage-collector.plist
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>co.inputoutput.openhiveos-usage-collector</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/richo/Sites/inputoutputco/OpenHiveOS/scripts/usage-collector/run-daily-usage-collector.sh</string>
+    </array>
+
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>3</integer>
+        <key>Minute</key>
+        <integer>15</integer>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>/Users/richo/Sites/inputoutputco/OpenHiveOS/logs/usage-collector/launchd.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/richo/Sites/inputoutputco/OpenHiveOS/logs/usage-collector/launchd.log</string>
+
+    <key>RunAtLoad</key>
+    <false/>
+</dict>
+</plist>
