@@ -17,6 +17,19 @@ const AgentSchema = z.object({
   name: z.string().min(1),
   /** One-line role description. */
   role: z.string().min(1),
+  /**
+   * Manifest 1.2.0 (#2556): agent-specific approver rule. Empty = default rule
+   * (elizabeth approves done; nova approves tasks assigned to elizabeth).
+   * Present for agents whose approval chain deviates from the default.
+   */
+  approvers: z.array(z.string().min(1)).optional(),
+  /**
+   * Manifest 1.2.0 (#2556): MCP tools the agent may call. Informational
+   * surface declaration (capability listing), not an enforcement gate —
+   * enforcement remains token-based via the agents table. Empty array =
+   * agent has no direct task surface (e.g. zero).
+   */
+  tools: z.array(z.string().min(1)).optional(),
 })
 
 export const SquadManifestSchema = z.object({
