@@ -49,6 +49,9 @@ export const REGISTERED_TOOL_NAMES = [
   'get_company_ethos',
   // LLM Usage Reporting (ARCH-015)
   'report_usage',
+  // LLM Registry Expansion (S17-BE-05 #2573)
+  'register_model',
+  'add_model_alias',
 ] as const
 
 export type RegisteredToolName = (typeof REGISTERED_TOOL_NAMES)[number]
