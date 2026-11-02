@@ -12,6 +12,7 @@
     "build:all": "tsc && npm run dashboard:build",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src --max-warnings 0",
+    "agents:check": "tsx scripts/check-agent-protocol.ts",
     "start": "node dist/index.js",
     "dev": "tsx watch src/index.ts",
     "dashboard:dev": "cd packages/dashboard && npm run dev",
