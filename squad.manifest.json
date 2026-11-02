@@ -1,5 +1,5 @@
 {
-  "version": "1.1.0",
+  "version": "1.2.0",
   "squad": "io-labs",
   "agents": [
     {
@@ -246,6 +246,54 @@
       "skills": [],
       "owns": [],
       "works_with": []
+    },
+    {
+      "slug": "one",
+      "name": "The One",
+      "role": "The Architect of the Software Factory (agent onboarding, Accountability Chart, Factory Ethos)",
+      "skills": [
+        "agent-customization",
+        "project-setup-info-local"
+      ],
+      "owns": [
+        "agent-onboarding",
+        "accountability-chart",
+        "factory-ethos",
+        "gwc-alignment"
+      ],
+      "works_with": [
+        "murphy",
+        "elizabeth",
+        "clarence",
+        "nova"
+      ],
+      "approvers": [
+        "elizabeth",
+        "nova"
+      ],
+      "tools": [
+        "create_task",
+        "query_tasks",
+        "query_thoughts",
+        "ratify_thought",
+        "search_memory",
+        "search_sops",
+        "set_disposition",
+        "get_disposition",
+        "store_memory",
+        "store_thought",
+        "update_task"
+      ]
+    },
+    {
+      "slug": "zero",
+      "name": "The Zero",
+      "role": "Counter-thought voice (names the gap in any decision; not user-facing; no direct task actions)",
+      "skills": [],
+      "owns": [],
+      "works_with": [],
+      "approvers": [],
+      "tools": []
     }
   ]
 }
