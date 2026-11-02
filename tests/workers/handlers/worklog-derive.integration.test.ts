@@ -42,8 +42,12 @@ async function realWithActor<T>(pool: Pool, actorSlug: string, fn: (tx: PoolClie
 
 let db: TestDb
 let taskId: number
-// Fixtures anchor the session on YESTERDAY relative to a fixed "now" so the
-// handler's default day window catches them.
+// Fixtures anchor invocations on a FIXED day (2026-10-30). The handler is
+// invoked with an explicit { day } payload for that date — the handler's
+// default (yesterday from the real clock) would drift as the calendar moves
+// and silently find nothing (2026-11-02 incident: 3 CI failures on main-
+// adjacent branches when the calendar advanced past the fixture date).
+const FIXTURE_DAY = '2026-10-30'
 const NOW = new Date('2026-10-31T10:00:00.000Z')
 
 function yesterdayIso(hour: number, minute = 0): string {
@@ -117,7 +121,7 @@ describe('worklog_derive handler', () => {
     await insertInvocation(db.pool, { session_id: 's1', task_id: taskId, called_at: yesterdayIso(9, 0), duration_ms: 60_000 })
     await insertInvocation(db.pool, { session_id: 's1', task_id: taskId, called_at: yesterdayIso(9, 10), duration_ms: 60_000 })
 
-    await worklogDeriveHandler('worklog_derive', null, db.pool)
+    await worklogDeriveHandler('worklog_derive', { day: FIXTURE_DAY }, db.pool)
 
     const wl = await db.pool.query<{ source: string; minutes: string; agent_slug: string; session_id: string | null }>(
       `SELECT source, minutes::text AS minutes, agent_slug, session_id FROM task_worklogs`,
@@ -134,8 +138,8 @@ describe('worklog_derive handler', () => {
 
   it('is idempotent — a second run corrects, never duplicates', async () => {
     await insertInvocation(db.pool, { session_id: 's1', task_id: taskId, called_at: yesterdayIso(9, 0), duration_ms: 60_000 })
-    await worklogDeriveHandler('worklog_derive', null, db.pool)
-    await worklogDeriveHandler('worklog_derive', null, db.pool)
+    await worklogDeriveHandler('worklog_derive', { day: FIXTURE_DAY }, db.pool)
+    await worklogDeriveHandler('worklog_derive', { day: FIXTURE_DAY }, db.pool)
 
     const n = await db.pool.query<{ n: string }>(`SELECT COUNT(*)::text AS n FROM task_worklogs`)
     expect(n.rows[0]!.n).toBe('1')
@@ -146,7 +150,7 @@ describe('worklog_derive handler', () => {
     await insertInvocation(db.pool, { session_id: 's1', task_id: taskId, called_at: yesterdayIso(9, 0), duration_ms: 60_000 })
     await insertInvocation(db.pool, { session_id: 's1', task_id: otherTask, called_at: yesterdayIso(9, 2), duration_ms: 60_000 })
 
-    await worklogDeriveHandler('worklog_derive', null, db.pool)
+    await worklogDeriveHandler('worklog_derive', { day: FIXTURE_DAY }, db.pool)
 
     const rows = await db.pool.query<{ task_id: number; minutes: string }>(
       `SELECT task_id, minutes::text AS minutes FROM task_worklogs ORDER BY task_id`,
@@ -158,7 +162,7 @@ describe('worklog_derive handler', () => {
     await insertInvocation(db.pool, { session_id: 's1', task_id: taskId, called_at: yesterdayIso(9, 0), duration_ms: 60_000, actor_type: 'automation' })
     await insertInvocation(db.pool, { session_id: 's1', task_id: taskId, called_at: yesterdayIso(9, 4), duration_ms: 60_000, actor_type: 'automation' })
 
-    await worklogDeriveHandler('worklog_derive', null, db.pool)
+    await worklogDeriveHandler('worklog_derive', { day: FIXTURE_DAY }, db.pool)
 
     const n = await db.pool.query<{ n: string }>(`SELECT COUNT(*)::text AS n FROM task_worklogs`)
     expect(n.rows[0]!.n).toBe('0')
@@ -172,11 +176,20 @@ describe('worklog_derive handler', () => {
     expect(n.rows[0]!.n).toBe('1')
   })
 
-  it('today-only sessions are invisible to the default (yesterday) window', async () => {
+  it('today-only sessions are invisible to a one-day-old window', async () => {
+    // Seeds an invocation "today" (relative to NOW) and derives YESTERDAY —
+    // the documented default window. The session must NOT be picked up:
+    // derivation is day-bucketed, not "everything newer than the window".
+    const todayIso = new Date(NOW.getTime() - 3_600_000).toISOString().slice(0, 10)
     await insertInvocation(db.pool, { session_id: 's1', task_id: taskId, called_at: new Date(NOW.getTime() - 3_600_000).toISOString(), duration_ms: 60_000 })
-    await worklogDeriveHandler('worklog_derive', null, db.pool)
+    await worklogDeriveHandler('worklog_derive', { day: FIXTURE_DAY }, db.pool)
     const n = await db.pool.query<{ n: string }>(`SELECT COUNT(*)::text AS n FROM task_worklogs`)
     expect(n.rows[0]!.n).toBe('0')
+    // And deriving the session's OWN day DOES pick it up — proving the zero
+    // above is window semantics, not a broken seed.
+    await worklogDeriveHandler('worklog_derive', { day: todayIso }, db.pool)
+    const n2 = await db.pool.query<{ n: string }>(`SELECT COUNT(*)::text AS n FROM task_worklogs`)
+    expect(n2.rows[0]!.n).toBe('1')
   })
 
   it('cross-midnight session attributes to its START day', async () => {
