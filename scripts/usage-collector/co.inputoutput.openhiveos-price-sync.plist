@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- S17-OPS-03 (#2572) — weekly price-sync. Local-only file, NOT in git (template).
+     Install:  cp scripts/usage-collector/co.inputoutput.openhiveos-price-sync.plist ~/Library/LaunchAgents/
+               launchctl load ~/Library/LaunchAgents/co.inputoutput.openhiveos-price-sync.plist
+     Verify:   launchctl list | grep openhiveos-price
+     Unload:   launchctl unload ~/Library/LaunchAgents/co.inputoutput.openhiveos-price-sync.plist
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>co.inputoutput.openhiveos-price-sync</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/richo/Sites/inputoutputco/OpenHiveOS/scripts/usage-collector/run-weekly-price-sync.sh</string>
+    </array>
+
+    <!-- Mondays 04:30 -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Weekday</key>
+        <integer>1</integer>
+        <key>Hour</key>
+        <integer>4</integer>
+        <key>Minute</key>
+        <integer>30</integer>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>/Users/richo/Sites/inputoutputco/OpenHiveOS/logs/price-sync/launchd.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/richo/Sites/inputoutputco/OpenHiveOS/logs/price-sync/launchd.log</string>
+
+    <key>RunAtLoad</key>
+    <false/>
+</dict>
+</plist>
