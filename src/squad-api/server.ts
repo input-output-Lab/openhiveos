@@ -16,6 +16,7 @@ import { projectsRouter } from './routes/projects.js'
 import { thoughtsRouter } from './routes/thoughts.js'
 import { integrationsRouter } from '../routes/integrations.js'
 import { webhooksRouter } from '../routes/webhooks.js'
+import { githubWebhookRouter } from '../routes/webhooks-github.js'
 import { oneRouter } from './routes/one.js'
 
 // ---------------------------------------------------------------------------
@@ -75,6 +76,7 @@ export function createSquadApiApp(): express.Application {
       next()
     },
     webhooksRouter,
+    githubWebhookRouter,
   )
 
   // Parse JSON request bodies — before all other route handlers (except /webhooks)
