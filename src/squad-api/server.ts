@@ -16,6 +16,7 @@ import { projectsRouter } from './routes/projects.js'
 import { thoughtsRouter } from './routes/thoughts.js'
 import { integrationsRouter } from '../routes/integrations.js'
 import { webhooksRouter } from '../routes/webhooks.js'
+import { githubWebhookRouter } from '../routes/webhooks-github.js'
 import { oneRouter } from './routes/one.js'
 
 // ---------------------------------------------------------------------------
@@ -68,13 +69,18 @@ export function createSquadApiApp(): express.Application {
   // ---------------------------------------------------------------------------
   app.use(
     '/webhooks',
-    express.raw({ type: 'application/json' }),
+    // Explicit 64kb body limit (Locksmith PR #39 review, task 2559): webhooks
+    // are small JSON envelopes; a tight bound caps memory-exhaustion surface.
+    // Default was an implicit 100kb — now explicit and shared by all webhook
+    // routes on this chain (ClickUp ARCH-024 + GitHub S18-BE-02).
+    express.raw({ type: 'application/json', limit: '64kb' }),
     (req, _res, next) => {
       // Capture raw body on request object for HMAC verification in webhook handlers
       (req as { rawBody?: Buffer }).rawBody = req.body as Buffer
       next()
     },
     webhooksRouter,
+    githubWebhookRouter,
   )
 
   // Parse JSON request bodies — before all other route handlers (except /webhooks)
