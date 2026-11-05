@@ -1,7 +1,8 @@
 import type { Request, Response, NextFunction } from 'express'
 import { createHash } from 'node:crypto'
 import { compareTokenHash } from '../../auth/token-comparison.js'
-import { withReaderRole } from '../db.js'
+import { withReaderRole, squadApiPool } from '../db.js'
+import { sessionAuthFallback } from '../auth/dashboard-session.js'
 
 // ---------------------------------------------------------------------------
 // Squad API bearer token auth middleware — ARCH-012 A7 (#1351)
@@ -53,6 +54,20 @@ function unauthorized(res: Response): void {
 }
 
 export async function authMiddleware(req: Request, res: Response, next: NextFunction): Promise<void> {
+  // No Authorization header at all → try the dashboard session cookie
+  // (S18-SEC-03 #2642: replaces the retired baked VITE token with a
+  // human login session). Bearer always wins when present.
+  if (!req.headers['authorization']) {
+    try {
+      await sessionAuthFallback(squadApiPool, req, res, next)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      console.error('[squad-api/auth] session fallback error:', message)
+      res.status(500).json({ error: 'Internal server error' })
+    }
+    return
+  }
+
   const parsed = parseBearer(req.headers['authorization'])
   if (!parsed) {
     unauthorized(res)

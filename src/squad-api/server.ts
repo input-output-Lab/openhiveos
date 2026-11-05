@@ -18,6 +18,7 @@ import { integrationsRouter } from '../routes/integrations.js'
 import { webhooksRouter } from '../routes/webhooks.js'
 import { githubWebhookRouter } from '../routes/webhooks-github.js'
 import { oneRouter } from './routes/one.js'
+import { authRouter } from './routes/auth.js'
 
 // ---------------------------------------------------------------------------
 // Squad API — Express 5 application factory (ARCH-012, ARCH-015, ARCH-024)
@@ -108,6 +109,12 @@ export function createSquadApiApp(): express.Application {
   // Rate-limited at 20 req/min (SEC-A4), then agent bearer token auth.
   // ---------------------------------------------------------------------------
   app.use('/api', squadApiRateLimit)
+
+  // /api/auth/* — dashboard human login (S18-SEC-03 #2642).
+  // MUST be mounted BEFORE authMiddleware: login is by definition the
+  // one /api path reachable without credentials. Rate limit still applies.
+  app.use('/api/auth', authRouter)
+
   app.use('/api', authMiddleware)
 
   // ---------------------------------------------------------------------------

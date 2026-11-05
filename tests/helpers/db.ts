@@ -59,6 +59,8 @@ const MIGRATIONS = [
   '026_tool_invocations_enrichment.sql',
   '027_task_worklogs.sql',
   '028_task_worklogs_human.sql',
+  // S18-SEC-03 (#2642): dashboard human login sessions.
+  '029_dashboard_sessions.sql',
 ]
 
 /**

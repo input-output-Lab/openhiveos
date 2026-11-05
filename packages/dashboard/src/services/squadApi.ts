@@ -22,23 +22,26 @@ import type {
 // ---------------------------------------------------------------------------
 // OpenHiveOS Dashboard API client (ARCH-012 A5)
 //
-// Auth: every request includes the DASHBOARD_AGENT_TOKEN bearer token.
-//       The token is baked at build time via VITE_DASHBOARD_AGENT_TOKEN.
-//       SEC-A2: token is not hardcoded — it comes from the build environment.
+// Auth: browser session cookie (S18-SEC-03 #2642).
+//       The build-time-baked VITE_DASHBOARD_AGENT_TOKEN is RETIRED —
+//       no credential exists in the bundle. The browser obtains an
+//       HttpOnly session cookie via POST /api/auth/login (human password),
+//       and every API call sends it with credentials: 'include'.
+//       On 401 the client dispatches 'squadapi:unauthorized' so the app
+//       shell can surface a login gate; calls succeed again after login.
 //
 // Base URL: empty by default → same-origin relative paths (production).
 //           In dev, Vite proxies /api/* → localhost:3005.
-//           Set VITE_SQUAD_API_URL to override for cross-origin access.
+//           Set VITE_SQUAD_API_URL to override for cross-origin access
+//           (server must allow that origin's credentials).
 // ---------------------------------------------------------------------------
 
 const BASE_URL = (import.meta.env['VITE_SQUAD_API_URL'] as string | undefined)?.replace(/\/$/, '') ?? ''
-const TOKEN = import.meta.env['VITE_DASHBOARD_AGENT_TOKEN'] as string | undefined
 
-if (!TOKEN) {
-  console.warn('[squadApi] VITE_DASHBOARD_AGENT_TOKEN is not set. All API calls will return 401.')
-}
+/** Fired on any 401 — the app shell listens to surface the login gate. */
+export const UNAUTHORIZED_EVENT = 'squadapi:unauthorized'
 
-// ─── Typed API error ──────────────────────────────────────────────────────────
+// ─── Typed API error ───────────────────────────────────────────────────────────
 
 export class SquadApiError extends Error {
   constructor(
@@ -58,9 +61,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   try {
     response = await fetch(`${BASE_URL}${path}`, {
+      credentials: 'include',
       headers: {
         'Content-Type': 'application/json',
-        ...(TOKEN ? { Authorization: `Bearer ${TOKEN}` } : {}),
         ...init?.headers,
       },
       ...init,
@@ -85,6 +88,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       response.status === 404 ? 'NOT_FOUND' :
       response.status === 429 ? 'RATE_LIMITED' :
       'INTERNAL_ERROR'
+    if (code === 'UNAUTHORIZED') {
+      // Central signal for the login gate (S18-SEC-03 #2642).
+      dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT))
+    }
     throw new SquadApiError(code, message)
   }
 
