@@ -42,6 +42,7 @@ interface TaskDbRow {
   status: string
   assignee_agent_slug: string | null
   github_pr_url: string | null
+  resolution: string | null
   notes: string | null
   metadata: Record<string, unknown>
   created_at: string
@@ -57,6 +58,7 @@ interface TaskRow {
   status: string
   assignee_agent_slug: string | null
   github_pr_url: string | null
+  resolution: string | null
   notes: string | null
   metadata: Record<string, unknown>
   created_at: string
@@ -174,6 +176,7 @@ router.get('/', async (req, res) => {
              t.status,
              t.assignee_agent_slug,
              t.github_pr_url,
+             t.resolution,
              t.notes,
              t.metadata,
              t.created_at,
@@ -202,6 +205,7 @@ router.get('/', async (req, res) => {
       status: row.status,
       assignee_agent_slug: row.assignee_agent_slug,
       github_pr_url: row.github_pr_url,
+      resolution: row.resolution,
       notes: row.notes,
       metadata: row.metadata,
       created_at: row.created_at,
