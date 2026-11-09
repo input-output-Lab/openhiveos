@@ -39,6 +39,7 @@ import { handleGetProjectBoard, getProjectBoardSchema } from './utilities/get-pr
 import { handleCreateTask, createTaskSchema } from './utilities/create-task.js'
 import { handleUpdateTask, updateTaskSchema } from './utilities/update-task.js'
 import { handleLogTime, logTimeSchema } from './utilities/log-time.js'
+import { handleGenerateReport, generateReportSchema } from './utilities/generate-report.js'
 import { handleRegisterModel, registerModelSchema } from './utilities/register-model.js'
 import { handleAddModelAlias, addModelAliasSchema } from './utilities/add-model-alias.js'
 import { handleQueryTasks, queryTasksSchema } from './utilities/query-tasks.js'
@@ -203,6 +204,13 @@ server.registerTool('update_task', { description: 'Update a task status, assigne
 server.registerTool('log_time', { description: 'Log time spent on a task. Only the task assignee or the project owner may log time. Minutes may be fractional (max 1440 per entry). worked_on defaults to today (UTC), must not be in the future, and may be at most 90 days back. Category is required (DA, UX, FE, BE, QA, DO, RI, PM).', inputSchema: logTimeSchema.shape }, async (args, extra) => {
   const slug = resolveCallSlug(extra)
   return { content: [{ type: 'text' as const, text: JSON.stringify(await handleLogTime(args, slug)) }] }
+})
+
+// generate_report — S18-BE-03 (#2562): read-only report service output.
+// scope=project|hive, period 1-90d, format md|json. Every section labels
+// its data source + coverage. Replaces the hand-made L10 scorecard.
+server.registerTool('generate_report', { description: 'Generate an internal metrics report. scope=project needs project_id; scope=hive covers the portfolio. Sections (status mix, aging, flow, estimate-vs-actual, cost, workload) each label their data source and coverage. format=md is paste-ready for docs/minutes; format=json returns the structured payload.', inputSchema: generateReportSchema.shape }, async (args) => {
+  return await handleGenerateReport(args)
 })
 
 // register_model — S17-BE-05 (#2573): registry expansion. Bearer auth = agent

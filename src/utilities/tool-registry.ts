@@ -27,6 +27,7 @@ export const REGISTERED_TOOL_NAMES = [
   'advance_sprint',
   'create_project',
   'create_task',
+  'generate_report',
   'get_project_board',
   'query_projects',
   'query_sprints',
