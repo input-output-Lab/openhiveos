@@ -10,6 +10,7 @@ import { agentsRouter } from './routes/agents.js'
 import { healthRouter } from './routes/health.js'
 import { internalRouter } from './routes/internal.js'
 import { usageRouter } from './routes/usage.js'
+import { auditRouter } from './routes/audit.js'
 import { budgetRouter } from './routes/budget.js'
 import { sopsRouter } from './routes/sops.js'
 import { tasksRouter } from './routes/tasks.js'
@@ -166,6 +167,10 @@ export function createSquadApiApp(): express.Application {
   // Auth enforced upstream by authMiddleware on /api/*.
   // Queries run via withReaderRole() — SELECT-only (SEC-A5).
   app.use('/api/usage', usageRouter)
+
+  // GET /api/audit/latest — latest audit_runs row (S18-FE-01 #2561 glue).
+  // Read-only peek; audit EXECUTION stays with the audit_hive MCP tool.
+  app.use('/api/audit', auditRouter)
 
   // GET /api/budget — internal budget view (S18-BE-05 #2560).
   // Auth enforced upstream by authMiddleware. INTERNAL ONLY — never

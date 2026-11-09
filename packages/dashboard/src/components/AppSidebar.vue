@@ -163,6 +163,22 @@ const IntegrationsIcon = () => h('svg', { viewBox: '0 0 24 24', fill: 'none', st
   h('circle', { cx: '12', cy: '12', r: '3' }),
 ])
 
+const ReportsIcon = () => h('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '2' }, [
+  h('path', { d: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z' }),
+  h('path', { d: 'M14 2v6h6' }),
+  h('path', { d: 'M16 13H8m8 4H8m2-8H8' }),
+])
+
+const BudgetIcon = () => h('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '2' }, [
+  h('circle', { cx: '12', cy: '12', r: '9' }),
+  h('path', { d: 'M12 7v10m3-8.5c0-1-1.3-1.5-3-1.5s-3 .7-3 1.8c0 2.7 6 1.3 6 4 0 1.1-1.3 1.7-3 1.7s-3-.5-3-1.5' }),
+])
+
+const AuditIcon = () => h('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '2' }, [
+  h('path', { d: 'M9 11l3 3 8-8' }),
+  h('path', { d: 'M21 12v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h11' }),
+])
+
 interface NavLink {
   to: string
   icon: any
@@ -176,6 +192,9 @@ interface NavLink {
 const activeLinks: NavLink[] = [
   { to: '/',              icon: DashboardIcon, label: 'Dashboard' },
   { to: '/inbox',         icon: InboxIcon, label: 'Inbox' },
+  { to: '/reports',       icon: ReportsIcon, label: 'Reports' },
+  { to: '/budget',        icon: BudgetIcon, label: 'Budget' },
+  { to: '/audit',         icon: AuditIcon, label: 'Audit' },
   { to: '/integrations',  icon: IntegrationsIcon, label: 'Integrations' },
   { to: '/usage',         icon: UsageIcon, label: 'Usage & Cost' },
   { to: '/agents',        icon: AgentsIcon, label: 'Agent Registry' },
