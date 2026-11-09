@@ -379,7 +379,9 @@ export async function generateReport(opts: {
   if (opts.scope === 'project') {
     if (!opts.projectId) throw new Error('project scope requires project_id')
     // Lightweight name lookup for the report title (no full board hydration).
-    const res = await pool.query<{ name: string }>(`SELECT name FROM projects WHERE id = $1`, [
+    // $1 typed explicitly — untyped param in a single-use query makes pg
+    // unable to infer ("could not determine data type of parameter $1").
+    const res = await pool.query<{ name: string }>(`SELECT name FROM projects WHERE id = $1::int`, [
       opts.projectId,
     ])
     projectName = res.rows[0]?.name ?? null
