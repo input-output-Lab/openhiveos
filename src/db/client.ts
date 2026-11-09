@@ -40,6 +40,11 @@ pool.on('error', (err) => {
 // must name its actor.
 //
 // Usage: wrap the write — withActor('murphy', () => updateTask(...)).
+// Optionally carries the S19-ARCH-01a identity-audit context:
+//   withActor('murphy', () => updateTask(...), { claimedPersona, authStrength })
+// which SET LOCALs hive.claimed_persona / hive.auth_strength for the same
+// transaction; migration 031's trigger writes them onto task_status_history
+// rows. Omitted context leaves those columns NULL (e.g. cron/system actors).
 // Implementation: dedicated pooled client, BEGIN, SET LOCAL (transaction-
 // scoped — the variable CANNOT leak to other pooled connections), commit.
 // SET LOCAL only applies inside a transaction; without BEGIN it silently
@@ -48,19 +53,53 @@ pool.on('error', (err) => {
 // with a wrong-or-missing actor.
 // ---------------------------------------------------------------------------
 
-export async function withActor<T>(actorSlug: string, fn: (tx: PoolClient) => Promise<T>): Promise<T> {
+export interface ActorIdentityContext {
+  /** Claimed persona label (LLM-supplied, spoofable by design — ARCH-026). */
+  claimedPersona?: string | null
+  /** Auth path: 'bearer' | 'dev' | 'session' | 'shared_token' | 'unverified'. */
+  authStrength?: string
+}
+
+const ACTOR_SLUG_RE = /^(system:[a-z0-9_-]+|[a-z][a-z0-9_-]*)$/
+
+export async function withActor<T>(
+  actorSlug: string,
+  fn: (tx: PoolClient) => Promise<T>,
+  identity?: ActorIdentityContext,
+): Promise<T> {
   // Defense-in-depth: parameterised SET LOCAL is not supported by Postgres for
   // config names, so the slug is interpolated. Assert the format HERE — never
   // trust upstream alone. Agent slugs are [a-z][a-z0-9_-]*; system actors are
   // 'system:<name>' which also satisfies the pattern. Anything else throws
   // before touching SQL (injection-proof standalone, not by call-site discipline).
-  if (!/^(system:[a-z0-9_-]+|[a-z][a-z0-9_-]*)$/.test(actorSlug)) {
+  if (!ACTOR_SLUG_RE.test(actorSlug)) {
     throw new Error(`[db] withActor: invalid actor slug format`)
+  }
+  // Identity-audit values are also interpolated into SET LOCAL below — apply
+  // the same strict shapes here. Values outside these shapes throw before any
+  // SQL runs (the persona shape matches the chk_*_claimed_persona domain in
+  // migration 031; auth_strength matches its CHECK value domain).
+  const claim = identity?.claimedPersona
+  if (claim !== undefined && claim !== null && !/^[a-z][a-z0-9_-]{0,63}$/.test(claim)) {
+    throw new Error(`[db] withActor: invalid claimed persona format`)
+  }
+  const strength = identity?.authStrength
+  if (
+    strength !== undefined &&
+    !['bearer', 'shared_token', 'dev', 'session', 'unverified'].includes(strength)
+  ) {
+    throw new Error(`[db] withActor: invalid auth strength`)
   }
   const client = await pool.connect()
   try {
     await client.query('BEGIN')
     await client.query(`SET LOCAL hive.actor = '${actorSlug}'`)
+    if (claim) {
+      await client.query(`SET LOCAL hive.claimed_persona = '${claim}'`)
+    }
+    if (strength) {
+      await client.query(`SET LOCAL hive.auth_strength = '${strength}'`)
+    }
     // CRITICAL: fn receives THIS client and must execute its queries on it.
     // SET LOCAL is connection-scoped — running fn's queries via pool.query()
     // would take a different pooled connection where hive.actor is unset

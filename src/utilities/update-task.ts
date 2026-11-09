@@ -4,6 +4,7 @@ import { updateTask, getTaskForActor } from '../db/queries/tasks.js'
 import { withActor } from '../db/client.js'
 import { isValidAgentSlug } from '../squad/manifest.js'
 import { assertTransition } from './task-transitions.js'
+import type { IdentityAuditContext } from '../auth/identity.js'
 
 export const updateTaskSchema = z.object({
   task_id: z.number().int().positive(),
@@ -64,7 +65,13 @@ export type UpdateTaskInput = z.infer<typeof updateTaskSchema>
 // request contains no owner-only fields. The DB enforces the row gate via an
 // extended WHERE (owner subquery OR assignee_agent_slug = $callerSlug).
 // Both gates must hold — neither alone is sufficient.
-export async function handleUpdateTask(input: UpdateTaskInput, agentSlug: string) {
+export async function handleUpdateTask(
+  input: UpdateTaskInput,
+  agentSlug: string,
+  // S19-ARCH-01a: claimed persona + auth strength for the transition history
+  // row (migration 031). Optional — cron/system and legacy callers omit it.
+  identity?: IdentityAuditContext,
+) {
   const parsed = updateTaskSchema.parse(input)
 
   // ARCH-024: `triage` is NOT in the status enum (see schema above), so it is
@@ -212,7 +219,7 @@ export async function handleUpdateTask(input: UpdateTaskInput, agentSlug: string
     ...(parsed.billing_high !== undefined ? { billing_high: parsed.billing_high } : {}),
     ...(parsed.estimate_confidence !== undefined ? { estimate_confidence: parsed.estimate_confidence } : {}),
     })
-  )
+  , identity)
   if (!result) {
     return {
       error: 'not_found_or_unauthorized',
