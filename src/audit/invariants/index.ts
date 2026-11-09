@@ -202,6 +202,39 @@ export const workflowTriageSla: Invariant = async () => {
   }
 }
 
+/**
+ * Gate-transition attribution (integrity): after the role-gated matrix went
+ * live, pending-close→done must never be attributed to 'system:sql' — that
+ * signature means a direct SQL write bypassed withActor attribution and the
+ * update_task gate entirely (S17 retro F1; recurred in the S18 done-batch).
+ * All gate transitions must route through the MCP path (approver token) or the
+ * cron auto-close path (system:auto_close via assertSystemTransition).
+ */
+export const integrityGateAttribution: Invariant = async () => {
+  const result = await pool.query<{ n: string; task_ids: string | null }>(
+    `SELECT COUNT(*)::text AS n, string_agg(task_id::text, ',' ORDER BY changed_at DESC) AS task_ids
+       FROM task_status_history
+      WHERE from_status = 'pending-close'
+        AND to_status = 'done'
+        AND changed_by = 'system:sql'
+        AND changed_at >= $1::timestamptz`,
+    [THRESHOLDS.transitionMatrixLiveDate],
+  )
+  const count = Number(result.rows[0]?.n ?? 0)
+  const sample = result.rows[0]?.task_ids
+  const ids = sample && sample.length > 0 ? ` (latest: ${sample.slice(0, 80)})` : ''
+  return {
+    id: 'integrity.gate-attribution',
+    severity: 'critical',
+    pass: count === 0,
+    count,
+    evidence:
+      count === 0
+        ? `All pending-close→done transitions since ${THRESHOLDS.transitionMatrixLiveDate} are attributable (approver/cron actors).`
+        : `${String(count)} done transition(s) attributed to system:sql after ${THRESHOLDS.transitionMatrixLiveDate} — direct-SQL bypass of the transition matrix${ids}`,
+  }
+}
+
 /** Seal integrity: ethos + one seal files must exist and be referenced by env. */
 export const integritySealsPresent: Invariant = async () => {
   const result = await pool.query<{ n: string }>(

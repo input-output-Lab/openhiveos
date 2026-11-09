@@ -11,6 +11,7 @@ import {
   workflowReviewAging,
   workflowUnassignedReview,
   workflowTriageSla,
+  integrityGateAttribution,
   integritySealsPresent,
   toolErrorRateAndP95,
 } from './invariants/index.js'
@@ -40,6 +41,7 @@ export const INVARIANTS: ReadonlyArray<Invariant> = [
   workflowUnassignedReview,
   workflowTriageSla,
   // Integrity
+  integrityGateAttribution,
   integritySealsPresent,
   // Tool health
   toolErrorRateAndP95,
