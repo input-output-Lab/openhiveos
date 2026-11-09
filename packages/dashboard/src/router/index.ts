@@ -19,6 +19,22 @@ export const router = createRouter({
       component: DashboardView,
       meta: { title: 'Dashboard' },
     },
+    // S18-FE-01 (#2561) — lazy-loaded to hold the Lighthouse budget
+    {
+      path: '/reports',
+      component: () => import('../views/ReportsView.vue'),
+      meta: { title: 'Reports' },
+    },
+    {
+      path: '/budget',
+      component: () => import('../views/BudgetView.vue'),
+      meta: { title: 'Budget' },
+    },
+    {
+      path: '/audit',
+      component: () => import('../views/AuditView.vue'),
+      meta: { title: 'Audit' },
+    },
     {
       path: '/agents',
       component: AgentsView,

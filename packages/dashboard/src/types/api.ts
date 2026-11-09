@@ -132,6 +132,7 @@ export interface TaskRow {
   status: TaskStatus
   assignee_agent_slug: string | null
   github_pr_url: string | null
+  resolution: string | null
   notes: string | null
   created_at: string
   updated_at: string

@@ -48,6 +48,8 @@ const MIGRATIONS = [
   // history + audit triggers, and 025's estimate columns.
   '014_pending_close_status.sql',
   '015_external_task_links.sql',
+  // S18-QA-01 (#2567): liveness invariant reads sync_queue.
+  '016_sync_queue.sql',
   '019_triage_status.sql',
   // S16/S17 portfolio matrix columns (business_value/strategic_fit/effort) —
   // required by reports.ts portfolioSummary (S18-BE-03/04/06).
@@ -63,6 +65,10 @@ const MIGRATIONS = [
   '026_tool_invocations_enrichment.sql',
   '027_task_worklogs.sql',
   '028_task_worklogs_human.sql',
+  // S18-SEC-03 (#2642): dashboard human login sessions.
+  '029_dashboard_sessions.sql',
+  // S18-QA-01 (#2567): audit runs history.
+  '030_audit_runs.sql',
 ]
 
 /**

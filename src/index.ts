@@ -40,6 +40,7 @@ import { handleCreateTask, createTaskSchema } from './utilities/create-task.js'
 import { handleUpdateTask, updateTaskSchema } from './utilities/update-task.js'
 import { handleLogTime, logTimeSchema } from './utilities/log-time.js'
 import { handleGenerateReport, generateReportSchema } from './utilities/generate-report.js'
+import { handleAuditHive, auditHiveSchema } from './utilities/audit-hive.js'
 import { handleRegisterModel, registerModelSchema } from './utilities/register-model.js'
 import { handleAddModelAlias, addModelAliasSchema } from './utilities/add-model-alias.js'
 import { handleQueryTasks, queryTasksSchema } from './utilities/query-tasks.js'
@@ -58,6 +59,7 @@ import type { RegisteredToolName } from './utilities/tool-registry.js'
 import { triggerWorkflowHandler } from './workers/handlers/trigger-workflow.js'
 import { taskAgingHandler } from './workers/handlers/task-aging.js'
 import { worklogDeriveHandler } from './workers/handlers/worklog-derive.js'
+import { runAuditHandler } from './workers/handlers/run-audit.js'
 import { runSopIngest } from './sops/ingest.js'
 
 await connectDb()           // Step 2
@@ -213,6 +215,14 @@ server.registerTool('generate_report', { description: 'Generate an internal metr
   return await handleGenerateReport(args)
 })
 
+// audit_hive — S18-QA-01 (#2567): read-only hive invariant audit. Runs the
+// full library (contract/data/liveness/workflow/integrity/tool-health),
+// persists one audit_runs history row, returns score + findings. Thresholds
+// in src/audit/types.ts (Scout-tunable). Co-owner: Scout.
+server.registerTool('audit_hive', { description: 'Run the read-only hive invariant audit: contract (status values), data integrity (orphans, invalid agents), liveness (crons, sync_queue, inbound events), workflow (review aging, triage SLA), seal integrity, and tool error rate/p95. Persists one audit_runs row per execution and returns score plus per-invariant findings with evidence.', inputSchema: auditHiveSchema.shape }, async (args) => {
+  return await handleAuditHive(args)
+})
+
 // register_model — S17-BE-05 (#2573): registry expansion. Bearer auth = agent
 // identity IS the authorization; every call audited via tool_invocations.
 server.registerTool('register_model', { description: 'Register a new LLM model in the cost-estimation registry. Creates the canonical model row plus optional aliases atomically. Idempotent on canonical_slug — re-registering returns the existing row and tops up missing aliases. canonical_slug must be vendor/model lowercase form (e.g. z-ai/glm-5.3-flashx). Registered models make cost estimation resolve instead of falling to cost_source unknown.', inputSchema: registerModelSchema.shape }, async (args, extra) => {
@@ -308,6 +318,7 @@ const cronHandlers: Map<RegisteredToolName, ToolHandler> = new Map([
   ['trigger_workflow', triggerWorkflowHandler],
   ['task_aging', taskAgingHandler], // S17-BE-02 #2551 — system-actor-only handler
   ['worklog_derive', worklogDeriveHandler], // S17-BE-04 #2552 — system-actor-only handler
+  ['run_audit', runAuditHandler], // S18-OPS-01 #2569 — hourly audit + threshold Slack alerts
 ])
 const dispatcher = new ToolDispatcher(pool, cronHandlers)
 const worker = new CronWorker(pool, dispatcher)

@@ -27,6 +27,7 @@ export const REGISTERED_TOOL_NAMES = [
   'advance_sprint',
   'create_project',
   'create_task',
+  'audit_hive',
   'generate_report',
   'get_project_board',
   'query_projects',
@@ -46,6 +47,9 @@ export const REGISTERED_TOOL_NAMES = [
   'task_aging',
   // Nightly active-time worklog derivation (S17-BE-04 #2552) — same posture
   'worklog_derive',
+  // Hourly hive audit + severity-threshold Slack alerts (S18-OPS-01 #2569)
+  // — cron-dispatcher-only, same P3 system path
+  'run_audit',
   // Ethos Utilities (ARCH-018 S8-03)
   'get_company_ethos',
   // LLM Usage Reporting (ARCH-015)

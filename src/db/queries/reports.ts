@@ -195,33 +195,26 @@ export async function llmCost(
   projectId: number | null,
   periodDays: number,
 ): Promise<{ rows: CostRow[]; cov: ReportCoverage }> {
-  // projectId === null → hive scope → aggregate by agent.
-  // projectId set → project scope → aggregate that project's cost.
-  // NOTE: the SQL branches were previously INVERTED (null selected the
-  // by-project query), which also broke pg's param typing ($2 referenced
-  // before $1 in the by-project text). Fixed: explicit branches, $1 before
-  // $2, both typed.
-  const byProject = projectId !== null
-  const sql = byProject
-    ? `SELECT p.name AS label,
-              COALESCE(SUM(u.cost_usd), 0)::text AS cost_usd,
-              COUNT(u.id)::text AS request_count
-         FROM llm_usage u
-         JOIN tasks t ON t.id = u.task_id
-         JOIN projects p ON p.id = t.project_id
-        WHERE t.project_id = $1::int
-          AND u.recorded_at >= now() - ($2::int * INTERVAL '1 day')
-     GROUP BY p.name`
-    : `SELECT COALESCE(u.agent_slug, 'unknown') AS label,
-              COALESCE(SUM(u.cost_usd), 0)::text AS cost_usd,
-              COUNT(u.id)::text AS request_count
-         FROM llm_usage u
-        WHERE u.recorded_at >= now() - ($1::int * INTERVAL '1 day')
-     GROUP BY u.agent_slug
-     ORDER BY SUM(u.cost_usd) DESC`
+  const byProject = projectId === null
   const result = await pool.query<{ label: string; cost_usd: string; request_count: string }>(
-    sql,
-    byProject ? [projectId, periodDays] : [periodDays],
+    byProject
+      ? `SELECT p.name AS label,
+                COALESCE(SUM(u.cost_usd), 0)::text AS cost_usd,
+                COUNT(u.id)::text AS request_count
+           FROM llm_usage u
+           JOIN tasks t ON t.id = u.task_id
+           JOIN projects p ON p.id = t.project_id
+          WHERE u.recorded_at >= now() - ($2::int * INTERVAL '1 day')
+            AND t.project_id = $1::int
+       GROUP BY p.name`
+      : `SELECT COALESCE(u.agent_slug, 'unknown') AS label,
+                COALESCE(SUM(u.cost_usd), 0)::text AS cost_usd,
+                COUNT(u.id)::text AS request_count
+           FROM llm_usage u
+          WHERE u.recorded_at >= now() - ($2::int * INTERVAL '1 day')
+       GROUP BY u.agent_slug
+       ORDER BY SUM(u.cost_usd) DESC`,
+    [projectId, periodDays],
   )
   const rows = result.rows.map((r) => ({
     label: r.label,

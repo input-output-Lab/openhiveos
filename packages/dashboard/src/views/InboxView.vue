@@ -72,6 +72,16 @@
             {{ task.status }}
           </DataBadge>
 
+          <!-- Resolution (pending-close/done cards — S18-FE-01 #2561) -->
+          <span
+            v-if="task.resolution && (task.status === 'pending-close' || task.status === 'done')"
+            class="text-xs font-mono flex-shrink-0 px-1.5 py-0.5 rounded"
+            style="background: rgba(26,127,90,0.12); color: #1a7f5a;"
+            :title="`Resolution: ${task.resolution}`"
+          >
+            {{ task.resolution }}
+          </span>
+
           <!-- Title -->
           <p class="flex-1 text-sm font-medium truncate min-w-0" style="color: var(--io-dark);">
             {{ task.title }}
