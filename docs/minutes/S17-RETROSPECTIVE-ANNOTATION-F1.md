@@ -76,7 +76,7 @@ this path:
 
 The same `system:sql` pattern resurfaced **once**: the S18 done-batch
 (2026-11-09 10:24:38, tasks 2560/2561/2562/2564/2565/2566/2567) was executed
-by the owner via SQL rather than Nova's approver token. The full chain is
+via SQL rather than Nova's approver token (operator-confirmed in session). The full chain is
 visible in `task_status_history` (Elizabeth review → pending-close at
 10:18–10:20, done at 10:24), so integrity held — but the attribution pattern
 repeated. Lesson recorded: batch closures should run through the approver's
