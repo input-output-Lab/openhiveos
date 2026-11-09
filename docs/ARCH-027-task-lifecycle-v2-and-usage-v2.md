@@ -4,7 +4,7 @@ date: 2026-11-09
 updated: 2026-11-09
 author: "Clarence"
 owner: "Silas (lifecycle) / Murphy (usage capture)"
-status: draft
+status: decided
 tags:
   - type/architecture
   - project/openhiveos
@@ -20,7 +20,7 @@ related:
   - "[[ARCH-024-external-task-sync-clickup-async-queue]]"
 ---
 
-*This ADR supersedes ARCH-023 and the state-machine portions of ARCH-015. It records the S16–S18 evolution: the seven-state lifecycle (triage→todo→wip→review→pending-close→done, plus rework), the reviewer/approver role resolution with the fail-closed domain defaults (P2 ruling), the aging policy (7/14/30), the resolution field, and the usage-capture v2 architecture (S18-BE-01 ingestion + SEC-C9 v2 model-registry revision). Status: DRAFT pending owner review (Silas, Murphy).*
+*This ADR supersedes ARCH-023 and the state-machine portions of ARCH-015. It records the S16–S18 evolution: the seven-state lifecycle (triage→todo→wip→review→pending-close→done, plus rework), the reviewer/approver role resolution with the fail-closed domain defaults (P2 ruling), the aging policy (7/14/30), the resolution field, and the usage-capture v2 architecture (S18-BE-01 ingestion + SEC-C9 v2 model-registry revision). Status: DECIDED per owner reviews (Silas lifecycle: approve-with-corrections applied 2026-11-09; Murphy usage-capture: schema-verified).*
 
 ---
 
@@ -32,7 +32,7 @@ related:
 
 **Date:** 2026-11-09
 **Project:** openhiveos
-**Status:** Draft — pending owner review
+**Status:** Decided (Silas lifecycle review 2026-11-09: approve-with-corrections applied; Murphy usage-capture half verified against live schema — registry, view, attribution columns, ingestion surfaces all confirmed)
 **Decision Owners:** Silas (lifecycle rules), Murphy (usage capture implementation)
 **Author:** Clarence (S18-DOC-01, #2568)
 
@@ -54,19 +54,33 @@ aging policy (S17-BE-02 #2551).
 **States (7):** `triage → todo → wip → review → pending-close → done`, with
 `rework` as a corrective loop entered from review.
 
-**Transition table (enforced by `task-transitions.ts` + DB trigger 024):**
+**Transition table (enforced by `task-transitions.ts` + DB trigger 024). This
+is the EXACT shipped matrix — `resolveActorRole` rejects everything else
+(no skips such as wip→done or review→done, no assignee back-transitions,
+no assignee→done — P1/P4):**
 
 | From | To | Required role |
 |---|---|---|
-| triage | todo | system (inbound processor) |
 | todo | wip | assignee or owner |
-| wip | review | assignee |
+| wip | review | assignee or owner |
 | review | pending-close | **reviewer only** |
 | review | rework | reviewer only |
-| review | done | reviewer only (legacy direct path) |
-| wip | todo | assignee (demotion) |
+| review | rework | system (aging cron reroute: ≥14d in review + unassigned) |
+| rework | wip | assignee or owner |
 | pending-close | done | approver only |
-| pending-close | rework | approver only |
+| pending-close | done | system (cron auto-close ONLY — 30d stale, `resolution=auto_closed`; never via `update_task` input) |
+
+**Rework return path:** a reworked task returns to `wip` — never directly to
+`review`. The assignee fixes the work, then submits `wip → review` again.
+There is no demotion path (`wip → todo`) and no legacy `review → done`
+direct path in the v2 matrix.
+
+**Triage intake (pre-matrix):** tasks ENTER the board as `triage` (inbound
+processor INSERT — 019 added the state to the CHECK after the original
+INSERT-violation defect). `triage → todo` is executed only by the promote
+endpoint (`src/services/integrations-promote.ts`: atomic
+`UPDATE … WHERE status='triage'` guard) — it is not part of the
+`task-transitions.ts` role matrix, which governs every post-todo state.
 
 **Role resolution (P2 fail-closed ruling, 2026-10-29):**
 
@@ -74,8 +88,11 @@ aging policy (S17-BE-02 #2551).
   owner.
 - Domain defaults (`REVIEWER_DOMAIN_DEFAULTS`): `arch → silas`,
   `security → locksmith`, `qa → scout`, `docs → clarence`, else → project owner.
-- `approver` = Nova (default approver), except Elizabeth-authored tasks where
-  Nova approves.
+- `approver` = resolved by project ownership: for **elizabeth-owned projects**
+  (project 70), Nova approves; on any other project, Elizabeth approves.
+  This is the `resolveApprover` rule exactly — and the resolution whose
+  reviewer/approver separation remains POLICY-only (no code guard compares
+  `resolveReviewer` to `resolveApprover`; retro finding F2/2688).
 - An assignee can never hold the reviewer role on their own work (integrity —
   a reviewer rubber-stamping their own submission is the failure ARCH-023's
   gate existed to prevent).
@@ -168,3 +185,4 @@ harness, not the model).
 | Version | Date | Author | Change |
 |---|---|---|---|
 | v0.1 draft | 2026-11-09 | Clarence (S18-DOC-01, #2568) | Initial draft — lifecycle v2 + usage v2, superseding ARCH-023 + ARCH-015 v2 sections. DRAFT pending Silas/Murphy owner review. |
+| v0.2 corrections | 2026-11-09 | Clarence per Silas owner review (thought 1342) | Lifecycle owner corrections: transition table replaced with the EXACT shipped matrix (removed 3 phantom rows — review→done legacy path, wip→todo demotion, pending-close→rework — all rejected by resolveActorRole); approver rule corrected to elizabeth-OWNED projects (not 'authored tasks') with the policy-only reviewer/approver separation noted (F2/2688); rework return path (rework→wip→review) made explicit; triage promotion mechanism documented (integrations-promote endpoint, atomic guard, pre-matrix). Part 2 verified against live schema, no changes. Authorized to flip draft→decided per Silas verdict. |
