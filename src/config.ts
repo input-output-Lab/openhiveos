@@ -45,6 +45,9 @@ const ConfigSchema = z.object({
   // ONE_SEAL_SECRET is NOT here — the MCP server never re-derives the HMAC.
   // It only compares the stored DB signature against the exported file signature.
   ONE_SEAL_PATH: z.string().min(1).default('./one.seal.json'),
+  // Slack alerting — S18-OPS-01 (#2569). Optional: without it, cron alerts
+  // no-op (delivered=false, reason='no_webhook') and the audit still runs.
+  ALERT_SLACK_WEBHOOK_URL: z.string().url().optional(),
 })
 
 export type Config = z.infer<typeof ConfigSchema>

@@ -59,6 +59,7 @@ import type { RegisteredToolName } from './utilities/tool-registry.js'
 import { triggerWorkflowHandler } from './workers/handlers/trigger-workflow.js'
 import { taskAgingHandler } from './workers/handlers/task-aging.js'
 import { worklogDeriveHandler } from './workers/handlers/worklog-derive.js'
+import { runAuditHandler } from './workers/handlers/run-audit.js'
 import { runSopIngest } from './sops/ingest.js'
 
 await connectDb()           // Step 2
@@ -317,6 +318,7 @@ const cronHandlers: Map<RegisteredToolName, ToolHandler> = new Map([
   ['trigger_workflow', triggerWorkflowHandler],
   ['task_aging', taskAgingHandler], // S17-BE-02 #2551 — system-actor-only handler
   ['worklog_derive', worklogDeriveHandler], // S17-BE-04 #2552 — system-actor-only handler
+  ['run_audit', runAuditHandler], // S18-OPS-01 #2569 — hourly audit + threshold Slack alerts
 ])
 const dispatcher = new ToolDispatcher(pool, cronHandlers)
 const worker = new CronWorker(pool, dispatcher)
