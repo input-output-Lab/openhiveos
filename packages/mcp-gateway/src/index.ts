@@ -186,6 +186,13 @@ function extractSurface(params: { _meta?: Record<string, unknown> }): string {
  * single join at write time so budget/analytics rollups skip it at read time.
  * Failures in this function must NOT crash or corrupt the upstream
  * tool call response. Errors are logged to stderr for operator inspection.
+ *
+ * S19-ARCH-01b: also records protocol-level calls (tools/list) — the
+ * discovery surface previously left no audit trace. These rows carry
+ * tool_name='tools/list' so every row stays attributable to the auth path
+ * that produced it; they have no task attribution (task_id/project_id NULL),
+ * and /mcp rows have session_id NULL so the worklog derivation view
+ * (v_session_active_time filters session_id IS NOT NULL) is unaffected.
  */
 function logToolInvocation(
   agentSlug: string,
@@ -354,8 +361,42 @@ app.post('/mcp', mcpRateLimiter, resolveAgentFromBearer, express.json({ limit: '
     { capabilities: { tools: {} } },
   )
 
-  server.setRequestHandler(ListToolsRequestSchema, async () => {
-    return client.listTools()
+  server.setRequestHandler(ListToolsRequestSchema, async (request) => {
+    // S19-ARCH-01b: the discovery surface is now audited like invocations —
+    // claim-provenance recording in tools/list is part of the Tier-3 scope.
+    // No arguments to fingerprint; duration + response size + request id for
+    // correlation; auth path is the resolved authStrength so every protocol
+    // call is attributable.
+    const start = Date.now()
+    let success = true
+    let errorClass: string | null = null
+    let responseBytes: number | null = null
+    try {
+      const result = await client.listTools()
+      responseBytes = JSON.stringify(result ?? {}).length
+      return result
+    } catch (err) {
+      success = false
+      errorClass = err instanceof Error ? err.constructor.name : 'UnknownError'
+      throw err
+    } finally {
+      const requestIdRaw: unknown = (request as unknown as { id?: string | number }).id
+      logToolInvocation(
+        agentSlug,
+        'tools/list',
+        'streamable_http',
+        Date.now() - start,
+        success,
+        errorClass,
+        {
+          sessionId: null,
+          requestId: requestIdRaw !== undefined ? String(requestIdRaw) : null,
+          arguments: null,
+          responseBytes,
+        },
+        { claimedPersona: null, authStrength },
+      )
+    }
   })
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
@@ -367,25 +408,19 @@ app.post('/mcp', mcpRateLimiter, resolveAgentFromBearer, express.json({ limit: '
     // tool's inputSchema (z4mini.object, strip mode) and silently removes unknown
     // keys before the handler receives args — causing the "missing __agentSlug" error.
     //
-    // S19-ARCH-01a: lift the optional `persona` claim into _meta.__claimedPersona.
-    // The gateway OVERWRITES any client-supplied __claimedPersona in _meta —
-    // exactly like __agentSlug, the claim's provenance is gateway-resolved
-    // from the (still spoofable, by design) tool argument, never from client
-    // _meta. Read from the RAW args before the claim key reaches the
-    // subprocess: it stays in arguments so the normal schema sees it only if
-    // a tool declares it; the subprocess reads it from _meta.
+    // S19-ARCH-01a/01b: the identity claims (__agentSlug, __claimedPersona,
+    // __authStrength) are assembled by buildProvenanceMeta — client _meta
+    // spreads FIRST, gateway-resolved values LAST, so a client can never
+    // spoof a stronger auth path or forge the claim's provenance. The claim
+    // itself is lifted from the RAW tool arguments (`persona`), never from
+    // client _meta — that stays the ARCH-026 spoofable-by-design carve-out.
     const rawArgs = (request.params.arguments ?? null) as Record<string, unknown> | null
     const claimedPersona = extractPersonaClaim(rawArgs)
     const augmentedParams = {
       ...request.params,
       // SDK type: arguments is object | undefined (never null)
       ...(rawArgs !== null ? { arguments: rawArgs } : {}),
-      _meta: {
-        ...(request.params._meta ?? {}),
-        __agentSlug: agentSlug,
-        __claimedPersona: claimedPersona,
-        __authStrength: authStrength,
-      },
+      _meta: buildProvenanceMeta(request.params._meta, { claimedPersona, authStrength }, agentSlug),
     }
 
     // T1-2 + S16-DB-03: log tool invocation (fire-and-forget, enriched)
@@ -467,8 +502,41 @@ app.get('/sse', sseRateLimiter, validateTokenQuery, async (req: Request, res: Re
     { capabilities: { tools: {} } },
   )
 
-  server.setRequestHandler(ListToolsRequestSchema, async () => {
-    return client.listTools()
+  server.setRequestHandler(ListToolsRequestSchema, async (request) => {
+    // S19-ARCH-01b: SSE discovery is audited too — shared_token strength,
+    // bridge actor (identity resolution on /sse is deferred per Silas
+    // ARCH-024 ruling; see the callTool handler note below). Same enrichment
+    // as the /mcp tools/list row: duration + response size + request id.
+    const start = Date.now()
+    let success = true
+    let errorClass: string | null = null
+    let responseBytes: number | null = null
+    try {
+      const result = await client.listTools()
+      responseBytes = JSON.stringify(result ?? {}).length
+      return result
+    } catch (err) {
+      success = false
+      errorClass = err instanceof Error ? err.constructor.name : 'UnknownError'
+      throw err
+    } finally {
+      const requestIdRaw: unknown = (request as unknown as { id?: string | number }).id
+      logToolInvocation(
+        'bridge',
+        'tools/list',
+        'sse',
+        Date.now() - start,
+        success,
+        errorClass,
+        {
+          sessionId: null,
+          requestId: requestIdRaw !== undefined ? String(requestIdRaw) : null,
+          arguments: null,
+          responseBytes,
+        },
+        { claimedPersona: null, authStrength: 'shared_token' },
+      )
+    }
   })
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
