@@ -99,4 +99,82 @@ router.get('/', async (_req, res) => {
   }
 })
 
+// ---------------------------------------------------------------------------
+// GET /health/deep — audit-depth health probe (S18-OPS-01 #2569).
+//
+// Returns the LATEST audit_runs row (score + failure counts) — read-only,
+// never executes the audit (a GET must not side-effect; execution belongs
+// to the run_audit cron and the audit_hive MCP tool).
+//
+// Shape:
+//   status:         'ok' | 'degraded' | 'no_data'
+//   service:        'squad-api'
+//   audit:          { run_id, score, critical_failures, warnings, ran_at }
+//   error?:         string
+//
+// HTTP 200 when a run exists (even with failing findings — the probe reports
+// audit state, it does not gate on it; monitors gate on the score field).
+// HTTP 503 'no_data' when no audit run exists yet (cron hasn't fired).
+// HTTP 503 'degraded' on DB error.
+// ---------------------------------------------------------------------------
+
+const LATEST_AUDIT_SQL = `
+  SELECT id::text            AS run_id,
+         score::text         AS score,
+         (SELECT COUNT(*) FROM jsonb_array_elements(findings) f
+           WHERE f->>'severity' = 'critical' AND (f->>'pass')::boolean = false) AS critical_failures,
+         (SELECT COUNT(*) FROM jsonb_array_elements(findings) f
+           WHERE f->>'severity' = 'warn' AND (f->>'pass')::boolean = false) AS warnings,
+         started_at          AS ran_at
+    FROM audit_runs
+   ORDER BY started_at DESC
+   LIMIT 1
+`
+
+router.get('/deep', async (_req, res) => {
+  const client = await squadApiPool.connect().catch((err: unknown): Error => {
+    return err instanceof Error ? err : new Error(String(err))
+  })
+
+  if (client instanceof Error) {
+    console.error('[squad-api/health/deep] Pool connect failed:', client.message)
+    res.status(503).json({ status: 'degraded', service: 'squad-api', error: client.message })
+    return
+  }
+
+  try {
+    const result = await client.query<{
+      run_id: string
+      score: string
+      critical_failures: string
+      warnings: string
+      ran_at: Date
+    }>(LATEST_AUDIT_SQL)
+
+    const row = result.rows[0]
+    if (!row) {
+      res.status(503).json({ status: 'no_data', service: 'squad-api' })
+      return
+    }
+
+    res.status(200).json({
+      status: 'ok',
+      service: 'squad-api',
+      audit: {
+        run_id: parseInt(row.run_id, 10),
+        score: parseFloat(row.score),
+        critical_failures: parseInt(row.critical_failures, 10),
+        warnings: parseInt(row.warnings, 10),
+        ran_at: row.ran_at,
+      },
+    })
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err)
+    console.error('[squad-api/health/deep] audit_runs query failed:', message)
+    res.status(503).json({ status: 'degraded', service: 'squad-api', error: message })
+  } finally {
+    client.release()
+  }
+})
+
 export { router as healthRouter }
