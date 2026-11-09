@@ -35,6 +35,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js'
 import { Gateway, resolveAgentSlug } from './gateway.js'
 import { assertDevAuthAllowed, DEV_ACTOR_SLUG } from './dev-auth.js'
+import { extractPersonaClaim, buildProvenanceMeta, META_AGENT_SLUG_KEY, META_CLAIMED_PERSONA_KEY, META_AUTH_STRENGTH_KEY, type IdentityAudit } from './auth-context.js'
 
 // ---------------------------------------------------------------------------
 // Boot-time validation (SEC-D2, SEC-D10)
@@ -194,6 +195,7 @@ function logToolInvocation(
   success: boolean,
   errorClass: string | null,
   ctx: ToolInvocationContext = { sessionId: null, requestId: null, arguments: null, responseBytes: null },
+  identity: IdentityAudit = { claimedPersona: null, authStrength: 'unverified' },
 ): void {
   const { keys, hash } = argsFingerprint(ctx.arguments)
   const taskId = extractTaskId(ctx.arguments)
@@ -219,8 +221,9 @@ function logToolInvocation(
       `INSERT INTO tool_invocations
          (agent_slug, tool_name, transport, duration_ms, success, error_class,
           session_id, request_id, task_id, project_id, client_surface,
-          actor_type, arg_keys, args_hash, error_message, response_bytes)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
+          actor_type, arg_keys, args_hash, error_message, response_bytes,
+          claimed_persona, auth_strength)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
       [
         agentSlug,
         toolName,
@@ -238,6 +241,8 @@ function logToolInvocation(
         hash,
         success ? null : errorClass,
         ctx.responseBytes,
+        identity.claimedPersona, // S19-ARCH-01a: spoofable-by-design claim label (ARCH-026)
+        identity.authStrength,   // S19-ARCH-01a: auth path that produced the attribution
       ],
     )
   })().catch((err) => {
@@ -291,9 +296,13 @@ async function resolveAgentFromBearer(
   // Boot guard above already ensured this is loopback + non-production.
   // S17-BE-06: dev callers map to a NON-PRIVILEGED identity. The old value
   // 'elizabeth' made every unauthenticated local call the APPROVER.
+  // S19-ARCH-01a: the resolved path stamps the audit rows — bearer-verified
+  // callers are 'bearer'; the dev-flag path is always 'dev' so the trail
+  // shows when attribution came from the non-privileged dev identity.
   const authDisabled = process.env['MCP_GATEWAY_AUTH_DISABLED'] === 'true'
   if (authDisabled) {
     res.locals['agentSlug'] = DEV_ACTOR_SLUG
+    res.locals['authStrength'] = 'dev'
     next()
     return
   }
@@ -314,6 +323,7 @@ async function resolveAgentFromBearer(
   }
 
   res.locals['agentSlug'] = agentSlug
+  res.locals['authStrength'] = 'bearer'
   next()
 }
 
@@ -334,6 +344,8 @@ app.post('/mcp', mcpRateLimiter, resolveAgentFromBearer, express.json({ limit: '
 
   // ARCH-021: agentSlug was resolved from the Bearer token by resolveAgentFromBearer.
   const agentSlug = res.locals['agentSlug'] as string
+  // S19-ARCH-01a: auth path stamped by the same middleware — always present.
+  const authStrength = (res.locals['authStrength'] as IdentityAudit['authStrength']) ?? 'unverified'
 
   const client = gateway.getClient()
 
@@ -354,11 +366,25 @@ app.post('/mcp', mcpRateLimiter, resolveAgentFromBearer, express.json({ limit: '
     // Injecting into arguments was incorrect: the SDK's safeParseAsync runs the
     // tool's inputSchema (z4mini.object, strip mode) and silently removes unknown
     // keys before the handler receives args — causing the "missing __agentSlug" error.
+    //
+    // S19-ARCH-01a: lift the optional `persona` claim into _meta.__claimedPersona.
+    // The gateway OVERWRITES any client-supplied __claimedPersona in _meta —
+    // exactly like __agentSlug, the claim's provenance is gateway-resolved
+    // from the (still spoofable, by design) tool argument, never from client
+    // _meta. Read from the RAW args before the claim key reaches the
+    // subprocess: it stays in arguments so the normal schema sees it only if
+    // a tool declares it; the subprocess reads it from _meta.
+    const rawArgs = (request.params.arguments ?? null) as Record<string, unknown> | null
+    const claimedPersona = extractPersonaClaim(rawArgs)
     const augmentedParams = {
       ...request.params,
+      // SDK type: arguments is object | undefined (never null)
+      ...(rawArgs !== null ? { arguments: rawArgs } : {}),
       _meta: {
         ...(request.params._meta ?? {}),
         __agentSlug: agentSlug,
+        __claimedPersona: claimedPersona,
+        __authStrength: authStrength,
       },
     }
 
@@ -380,16 +406,15 @@ app.post('/mcp', mcpRateLimiter, resolveAgentFromBearer, express.json({ limit: '
       throw err
     } finally {
       const durationMs = Date.now() - start
-      const args = (request.params.arguments ?? null) as Record<string, unknown> | null
       // MCP JSON-RPC request id lives on the handler envelope, not params.
       // The SDK types params without it; the handler receives the full message.
       const requestIdRaw: unknown = (request as unknown as { id?: string | number }).id
       logToolInvocation(agentSlug, request.params.name, 'streamable_http', durationMs, success, errorClass, {
         sessionId: null, // stateless transport: correlation via request_id
         requestId: requestIdRaw !== undefined ? String(requestIdRaw) : null,
-        arguments: args,
+        arguments: rawArgs,
         responseBytes,
-      })
+      }, { claimedPersona, authStrength })
       void errorText // error detail lives in error_message via errorClass when insert enriches; kept for stderr parity
     }
   })
@@ -465,7 +490,13 @@ app.get('/sse', sseRateLimiter, validateTokenQuery, async (req: Request, res: Re
       throw err
     } finally {
       const durationMs = Date.now() - start
-      logToolInvocation(agentSlugForLogging, request.params.name, 'sse', durationMs, success, errorClass)
+      // S19-ARCH-01a: the shared /sse Bridge token is a single credential for
+      // every integration — weaker than per-agent bearer, stamped as such so
+      // the audit trail distinguishes Bridge calls from agent calls.
+      logToolInvocation(agentSlugForLogging, request.params.name, 'sse', durationMs, success, errorClass, undefined, {
+        claimedPersona: null,
+        authStrength: 'shared_token',
+      })
     }
   })
 

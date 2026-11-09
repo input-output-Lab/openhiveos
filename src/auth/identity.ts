@@ -205,3 +205,54 @@ export function extractGatewaySlug(extra: { _meta?: Record<string, unknown> }): 
 
   return slug
 }
+
+// ---------------------------------------------------------------------------
+// extractIdentityAudit — S19-ARCH-01a (#2774): claimed-persona + auth-strength
+//
+// Reads __claimedPersona and __authStrength from request._meta — both are
+// injected by the gateway at call time (same _meta sideband as __agentSlug).
+// The gateway is the ONLY legitimate source: it resolves both from the auth
+// path and the raw tool arguments, overwriting any client-supplied values.
+//
+// Fail-safe rule (audit understatement): if __authStrength is absent or
+// malformed, the value degrades to 'unverified' — an audit row must never
+// look stronger than the evidence. A spoofed attempt to claim 'session'
+// or 'bearer' via raw _meta collapses to 'unverified' because the gateway
+// overwrites it before the subprocess ever sees it.
+//
+// The persona claim is NOT validated against squad.manifest.json: a claim
+// for a persona that doesn't exist is still an audit fact worth recording
+// (who claimed what, when). Malformed claims arrive as null.
+// ---------------------------------------------------------------------------
+
+export interface IdentityAuditContext {
+  /** Claimed persona label, or null when no valid claim was made. */
+  claimedPersona: string | null
+  /** Auth path that produced the attribution ('bearer' | 'dev' | 'unverified' in GATEWAY_MODE). */
+  authStrength: string
+}
+
+const KNOWN_AUTH_STRENGTHS = new Set([
+  'bearer',
+  'shared_token',
+  'dev',
+  'session',
+  'unverified',
+])
+
+const PERSONA_CLAIM_RE = /^[a-z][a-z0-9_-]{0,63}$/
+
+export function extractIdentityAudit(extra: { _meta?: Record<string, unknown> }): IdentityAuditContext {
+  const rawClaim = extra._meta?.['__claimedPersona']
+  const rawStrength = extra._meta?.['__authStrength']
+
+  const claimedPersona =
+    typeof rawClaim === 'string' && PERSONA_CLAIM_RE.test(rawClaim) ? rawClaim : null
+
+  const authStrength =
+    typeof rawStrength === 'string' && KNOWN_AUTH_STRENGTHS.has(rawStrength)
+      ? rawStrength
+      : 'unverified'
+
+  return { claimedPersona, authStrength }
+}

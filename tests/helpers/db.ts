@@ -69,6 +69,9 @@ const MIGRATIONS = [
   '029_dashboard_sessions.sql',
   // S18-QA-01 (#2567): audit runs history.
   '030_audit_runs.sql',
+  // S19-ARCH-01a (#2774): claimed_persona + auth_strength audit columns on
+  // tool_invocations + task_status_history (incl. the 031 trigger body).
+  '031_identity_audit_columns.sql',
 ]
 
 /**

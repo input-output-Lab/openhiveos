@@ -23,7 +23,7 @@ import { checkFingerprint } from './db/fingerprint.js'
 import { checkEthosSeal } from './db/ethos-seal.js'
 import { checkOneSeal } from './db/one-seal.js'
 import { startHealthServer } from './health.js'
-import { resolveIdentity, extractGatewaySlug } from './auth/identity.js'
+import { resolveIdentity, extractGatewaySlug, extractIdentityAudit } from './auth/identity.js'
 import { handleGetDisposition, getDispositionSchema } from './primitives/get-disposition.js'
 import { handleQueryThoughts, queryThoughtsSchema } from './primitives/query-thoughts.js'
 import { handleRatifyThought, ratifyThoughtSchema } from './primitives/ratify-thought.js'
@@ -198,7 +198,10 @@ server.registerTool('create_task', { description: 'Create a new task under a pro
 // update_task — write, requires agentSlug (SEC-21 ownership in WHERE clause)
 server.registerTool('update_task', { description: 'Update a task status, assignee, notes, or GitHub PR URL. Valid statuses: todo → wip → review → done | rework. The calling agent must own the parent project. Pass project_id to reassign the task to a different project (target project must also be owned by the calling agent).', inputSchema: updateTaskSchema.shape }, async (args, extra) => {
   const slug = resolveCallSlug(extra)
-  return { content: [{ type: 'text' as const, text: JSON.stringify(await handleUpdateTask(args, slug)) }] }
+  // S19-ARCH-01a: the transition history row records the claimed persona and
+  // the auth strength the gateway resolved for this call (migration 031).
+  const identity = extractIdentityAudit(extra)
+  return { content: [{ type: 'text' as const, text: JSON.stringify(await handleUpdateTask(args, slug, identity)) }] }
 })
 
 // log_time — write, requires agentSlug (assignee or project owner only; S17
