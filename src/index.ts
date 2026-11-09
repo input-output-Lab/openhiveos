@@ -40,6 +40,7 @@ import { handleCreateTask, createTaskSchema } from './utilities/create-task.js'
 import { handleUpdateTask, updateTaskSchema } from './utilities/update-task.js'
 import { handleLogTime, logTimeSchema } from './utilities/log-time.js'
 import { handleGenerateReport, generateReportSchema } from './utilities/generate-report.js'
+import { handleAuditHive, auditHiveSchema } from './utilities/audit-hive.js'
 import { handleRegisterModel, registerModelSchema } from './utilities/register-model.js'
 import { handleAddModelAlias, addModelAliasSchema } from './utilities/add-model-alias.js'
 import { handleQueryTasks, queryTasksSchema } from './utilities/query-tasks.js'
@@ -211,6 +212,14 @@ server.registerTool('log_time', { description: 'Log time spent on a task. Only t
 // its data source + coverage. Replaces the hand-made L10 scorecard.
 server.registerTool('generate_report', { description: 'Generate an internal metrics report. scope=project needs project_id; scope=hive covers the portfolio. Sections (status mix, aging, flow, estimate-vs-actual, cost, workload) each label their data source and coverage. format=md is paste-ready for docs/minutes; format=json returns the structured payload.', inputSchema: generateReportSchema.shape }, async (args) => {
   return await handleGenerateReport(args)
+})
+
+// audit_hive — S18-QA-01 (#2567): read-only hive invariant audit. Runs the
+// full library (contract/data/liveness/workflow/integrity/tool-health),
+// persists one audit_runs history row, returns score + findings. Thresholds
+// in src/audit/types.ts (Scout-tunable). Co-owner: Scout.
+server.registerTool('audit_hive', { description: 'Run the read-only hive invariant audit: contract (status values), data integrity (orphans, invalid agents), liveness (crons, sync_queue, inbound events), workflow (review aging, triage SLA), seal integrity, and tool error rate/p95. Persists one audit_runs row per execution and returns score plus per-invariant findings with evidence.', inputSchema: auditHiveSchema.shape }, async (args) => {
+  return await handleAuditHive(args)
 })
 
 // register_model — S17-BE-05 (#2573): registry expansion. Bearer auth = agent
