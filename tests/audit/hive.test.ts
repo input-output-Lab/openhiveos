@@ -33,6 +33,7 @@ const {
   workflowReviewAging,
   workflowTriageSla,
   toolErrorRateAndP95,
+  integrityGateAttribution,
 } = await import('../../src/audit/invariants/index.js')
 const { runAudit, INVARIANTS } = await import('../../src/audit/runner.js')
 
@@ -188,6 +189,58 @@ describe.skipIf(!hasDb)('invariants (DB fixtures)', () => {
     )
     expect(r.count).toBe(Number(truth.rows[0]!.n))
     expect(r.pass).toBe(Number(truth.rows[0]!.n) === 0)
+  })
+
+  it('integrity.gate-attribution FAILS on a post-matrix system:sql done row', async () => {
+    // Insert a task + a system:sql pending-close→done row dated AFTER the
+    // matrix live date (2026-11-02) — the exact S17-F1 / S18 done-batch
+    // signature. Direct history INSERT (024 trigger writes only on UPDATE).
+    await db.pool.query(
+      `INSERT INTO tasks (title, description, project_id, status, assignee_agent_slug)
+       VALUES ('gate-attribution fail fixture', 'x',
+               (SELECT id FROM projects WHERE slug = 'aud-proj'), 'done', 'rest-agent')`,
+    )
+    const tid = await db.pool.query<{ id: string }>(
+      `SELECT id FROM tasks WHERE title = 'gate-attribution fail fixture' LIMIT 1`,
+    )
+    await db.pool.query(
+      `INSERT INTO task_status_history (task_id, from_status, to_status, changed_by, changed_at)
+       VALUES ($1, 'pending-close', 'done', 'system:sql', now())`,
+      [Number(tid.rows[0]!.id)],
+    )
+    const r = await integrityGateAttribution()
+    expect(r.pass).toBe(false)
+    expect(r.severity).toBe('critical')
+    expect(r.count).toBeGreaterThanOrEqual(1)
+    expect(r.evidence).toContain('system:sql')
+  })
+
+  it('integrity.gate-attribution PASSES when only attributable actors close gates', async () => {
+    // The FAIL fixture above already inserted its row; a dedicated PASS case
+    // needs a clean table state. Assert the invariant reacts to actor value:
+    // an identical transition by an approver (nova) must NOT be flagged.
+    await db.pool.query(
+      `INSERT INTO tasks (title, description, project_id, status, assignee_agent_slug)
+       VALUES ('gate-attribution pass fixture', 'x',
+               (SELECT id FROM projects WHERE slug = 'aud-proj'), 'done', 'rest-agent')`,
+    )
+    const tid = await db.pool.query<{ id: string }>(
+      `SELECT id FROM tasks WHERE title = 'gate-attribution pass fixture' LIMIT 1`,
+    )
+    await db.pool.query(
+      `INSERT INTO task_status_history (task_id, from_status, to_status, changed_by, changed_at)
+       VALUES ($1, 'pending-close', 'done', 'nova', now())`,
+      [Number(tid.rows[0]!.id)],
+    )
+    // This test's nova row alone would pass — but the FAIL fixture's row may
+    // still be present in the shared container. Count BOTH and assert the
+    // nova-only delta is invisible: flag count must equal the system:sql count.
+    const sys = await db.pool.query<{ n: string }>(
+      `SELECT COUNT(*)::text AS n FROM task_status_history
+        WHERE to_status='done' AND changed_by='system:sql' AND changed_at >= '2026-11-02'`,
+    )
+    const r = await integrityGateAttribution()
+    expect(r.count).toBe(Number(sys.rows[0]!.n))
   })
 
   it('tool.error-rate-p95 reports sample coverage honestly', async () => {

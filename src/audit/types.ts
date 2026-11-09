@@ -43,6 +43,10 @@ export const THRESHOLDS = {
   toolMinSamples: 20,
   /** Tool look-back window (days) for error rate / p95. */
   toolWindowDays: 7,
+  /** First date the role-gated transition matrix (PR #28) was live in prod.
+   *  Gate transitions attributed to system:sql AFTER this date are unsanctioned
+   *  direct-SQL bypasses of withActor (S17 retro F1 / S18 done-batch pattern). */
+  transitionMatrixLiveDate: '2026-11-02',
 } as const
 
 /**
