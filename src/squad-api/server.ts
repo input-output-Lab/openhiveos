@@ -10,6 +10,7 @@ import { agentsRouter } from './routes/agents.js'
 import { healthRouter } from './routes/health.js'
 import { internalRouter } from './routes/internal.js'
 import { usageRouter } from './routes/usage.js'
+import { budgetRouter } from './routes/budget.js'
 import { sopsRouter } from './routes/sops.js'
 import { tasksRouter } from './routes/tasks.js'
 import { projectsRouter } from './routes/projects.js'
@@ -165,6 +166,11 @@ export function createSquadApiApp(): express.Application {
   // Auth enforced upstream by authMiddleware on /api/*.
   // Queries run via withReaderRole() — SELECT-only (SEC-A5).
   app.use('/api/usage', usageRouter)
+
+  // GET /api/budget — internal budget view (S18-BE-05 #2560).
+  // Auth enforced upstream by authMiddleware. INTERNAL ONLY — never
+  // surface in client-facing reports (see route header comment).
+  app.use('/api/budget', budgetRouter)
 
   // GET /api/integrations/status — Integration health status (ARCH-024)
   // Auth enforced upstream by authMiddleware on /api/*.
