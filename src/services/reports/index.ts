@@ -8,6 +8,10 @@ import {
   agentWorkload,
   portfolioSummary,
   crossProjectBlockers,
+  cycleTimePerStatus,
+  leadTime,
+  velocity,
+  burndown,
   type ReportCoverage,
   type StatusMixRow,
   type AgingRow,
@@ -16,6 +20,9 @@ import {
   type AgentWorkloadRow,
   type PortfolioRow,
   type BlockerRow,
+  type StatusCycleRow,
+  type VelocityRow,
+  type BurndownPoint,
 } from '../../db/queries/reports.js'
 
 // ---------------------------------------------------------------------------
@@ -42,6 +49,14 @@ export interface ReportSection<T> {
   emptyNote: string
 }
 
+export interface FlowDetail {
+  cycle_time_per_status: StatusCycleRow[]
+  lead_time_hours: number | null
+  lead_time_samples: number
+  velocity: VelocityRow[]
+  burndown: BurndownPoint[]
+}
+
 export interface ProjectReport {
   scope: 'project'
   project_id: number
@@ -56,6 +71,7 @@ export interface ProjectReport {
       reviews_entered: number
       avg_cycle_hours: number | null
     }>
+    flow_detail: ReportSection<FlowDetail>
     estimate_vs_actual: ReportSection<EstimateActualRow[]>
     cost: ReportSection<CostRow[]>
     agent_workload: ReportSection<AgentWorkloadRow[]>
@@ -76,16 +92,21 @@ export interface HiveReport {
       avg_cycle_hours: number | null
     }>
     agent_workload: ReportSection<AgentWorkloadRow[]>
+    flow_detail: ReportSection<FlowDetail>
     blockers: ReportSection<BlockerRow[]>
     cost: ReportSection<CostRow[]>
   }
 }
 
 export async function projectReport(projectId: number, periodDays: number): Promise<ProjectReport> {
-  const [mix, aging, flow, est, cost, workload] = await Promise.all([
+  const [mix, aging, flow, cycles, lead, vel, burn, est, cost, workload] = await Promise.all([
     statusMix(projectId),
     agingBuckets(projectId),
     historyMetrics(projectId, periodDays),
+    cycleTimePerStatus(projectId, periodDays),
+    leadTime(projectId, periodDays),
+    velocity(projectId, periodDays),
+    burndown(projectId, periodDays),
     estimateActual(projectId),
     llmCost(projectId, periodDays),
     agentWorkload(projectId, periodDays),
@@ -110,6 +131,18 @@ export async function projectReport(projectId: number, periodDays: number): Prom
         },
         emptyNote: 'No status history in the window — flow metrics need task_status_history rows.',
       },
+      flow_detail: {
+        name: 'Flow detail (cycle time per status, lead time, velocity, burndown)',
+        coverage: cycles.cov,
+        data: {
+          cycle_time_per_status: cycles.rows,
+          lead_time_hours: lead.avg_lead_hours,
+          lead_time_samples: lead.samples,
+          velocity: vel.rows,
+          burndown: burn.rows,
+        },
+        emptyNote: 'No status history in the window — flow detail needs task_status_history rows.',
+      },
       estimate_vs_actual: {
         name: 'Estimate vs actual hours',
         coverage: est.cov,
@@ -133,10 +166,14 @@ export async function projectReport(projectId: number, periodDays: number): Prom
 }
 
 export async function hiveReport(periodDays: number): Promise<HiveReport> {
-  const [portfolio, mix, flow, workload, blockers, cost] = await Promise.all([
+  const [portfolio, mix, flow, cycles, lead, vel, burn, workload, blockers, cost] = await Promise.all([
     portfolioSummary(),
     statusMix(null),
     historyMetrics(null, periodDays),
+    cycleTimePerStatus(null, periodDays),
+    leadTime(null, periodDays),
+    velocity(null, periodDays),
+    burndown(null, periodDays),
     agentWorkload(null, periodDays),
     crossProjectBlockers(),
     llmCost(null, periodDays),
@@ -170,6 +207,18 @@ export async function hiveReport(periodDays: number): Promise<HiveReport> {
         coverage: workload.cov,
         data: workload.rows,
         emptyNote: 'No assigned tasks or logged work.',
+      },
+      flow_detail: {
+        name: 'Flow detail (cycle time per status, lead time, velocity, burndown)',
+        coverage: cycles.cov,
+        data: {
+          cycle_time_per_status: cycles.rows,
+          lead_time_hours: lead.avg_lead_hours,
+          lead_time_samples: lead.samples,
+          velocity: vel.rows,
+          burndown: burn.rows,
+        },
+        emptyNote: 'No status history in the window.',
       },
       blockers: {
         name: 'Cross-project blockers (review/rework > 2d)',
@@ -235,6 +284,32 @@ export function renderMarkdown(
     } else if (section.name.startsWith('Aging')) {
       const d = section.data as AgingRow[]
       lines.push(renderRows(['age bucket', 'open tasks'], d.map((r) => [r.bucket, r.count])))
+    } else if (section.name.startsWith('Flow detail')) {
+      const d = section.data as FlowDetail
+      if (d.cycle_time_per_status.length > 0) {
+        lines.push(
+          renderRows(
+            ['status', 'avg hours to next status', 'samples'],
+            d.cycle_time_per_status.map((r) => [r.to_status, r.avg_hours, r.samples]),
+          ),
+        )
+      }
+      lines.push('')
+      lines.push(
+        d.lead_time_hours === null
+          ? '_Lead time: no completed todo→done spans in the window._'
+          : `Lead time (todo → done): **${String(d.lead_time_hours)}h** avg over ${String(d.lead_time_samples)} task${d.lead_time_samples === 1 ? '' : 's'}`,
+      )
+      if (d.velocity.length > 0) {
+        lines.push('')
+        lines.push('Velocity (done per sprint window):')
+        lines.push(renderRows(['window', 'done'], d.velocity.map((r) => [r.label, r.done_count])))
+      }
+      if (d.burndown.length > 0) {
+        lines.push('')
+        lines.push('Burndown (open tasks per day):')
+        lines.push(renderRows(['date', 'open tasks'], d.burndown.map((r) => [r.date, r.remaining])))
+      }
     } else if (section.name.startsWith('Flow')) {
       const d = section.data as { done_count: number; rework_events: number; reviews_entered: number; avg_cycle_hours: number | null }
       lines.push(
