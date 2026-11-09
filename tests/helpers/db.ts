@@ -51,6 +51,10 @@ const MIGRATIONS = [
   // S18-QA-01 (#2567): liveness invariant reads sync_queue.
   '016_sync_queue.sql',
   '019_triage_status.sql',
+  // S16/S17 portfolio matrix columns (business_value/strategic_fit/effort) —
+  // required by reports.ts portfolioSummary (S18-BE-03/04/06).
+  '012_project_portfolio_matrix.sql',
+  '013_fix_risk_index_constraint.sql',
   '020_task_metadata.sql',
   '024_task_lifecycle.sql',
   '025_task_estimates.sql',

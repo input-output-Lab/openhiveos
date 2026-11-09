@@ -377,3 +377,197 @@ export async function crossProjectBlockers(): Promise<{ rows: BlockerRow[]; cov:
   }))
   return { rows, cov: coverage('tasks (review/rework > 2d)', 0, rows.length) }
 }
+
+// ─── Flow metrics detail (S18-BE-06 #2565) ──────────────────────────────────
+//
+// Deeper task_status_history aggregations than historyMetrics():
+//   cycleTimePerStatus — avg hours spent per destination status (wip, review,
+//                        done) across transitions completed in the window
+//   leadTime           — avg hours from first 'todo' entry to 'done'
+//   timeInReview       — avg cumulative review hours per task that entered
+//                        review in the window
+// Velocity (done per sprint) and burndown are separate functions below.
+//
+// All windows: transitions with changed_at >= now() - periodDays.
+
+export interface StatusCycleRow {
+  to_status: string
+  avg_hours: number
+  samples: number
+}
+
+export async function cycleTimePerStatus(
+  projectId: number | null,
+  periodDays: number,
+): Promise<{ rows: StatusCycleRow[]; cov: ReportCoverage }> {
+  const result = await pool.query<{ to_status: string; avg_hours: string; samples: string }>(
+    `WITH exits AS (
+       SELECT h.task_id, h.to_status, h.changed_at,
+              LEAD(h.changed_at) OVER (PARTITION BY h.task_id ORDER BY h.changed_at) AS next_at
+         FROM task_status_history h
+         JOIN tasks t ON t.id = h.task_id
+        WHERE h.changed_at >= now() - ($2::int * INTERVAL '1 day')
+          AND ($1::int IS NULL OR t.project_id = $1::int)
+     )
+     SELECT to_status,
+            ROUND(AVG(EXTRACT(EPOCH FROM (next_at - changed_at)) / 3600)::numeric, 1)::text AS avg_hours,
+            COUNT(*)::text AS samples
+       FROM exits
+      WHERE next_at IS NOT NULL
+   GROUP BY to_status`,
+    [projectId, periodDays],
+  )
+  const rows = result.rows.map((r) => ({
+    to_status: r.to_status,
+    avg_hours: Number(r.avg_hours),
+    samples: Number(r.samples),
+  }))
+  return { rows, cov: coverage('task_status_history (transition spans)', periodDays, rows.length) }
+}
+
+export interface LeadTimeResult {
+  avg_lead_hours: number | null
+  samples: number
+  cov: ReportCoverage
+}
+
+/** Lead time: first 'todo' entry → first 'done' per task finished in window. */
+export async function leadTime(
+  projectId: number | null,
+  periodDays: number,
+): Promise<LeadTimeResult> {
+  const result = await pool.query<{ avg_lead_hours: string | null; samples: string }>(
+    `WITH starts AS (
+       SELECT task_id, MIN(changed_at) AS started_at
+         FROM task_status_history h
+         JOIN tasks t ON t.id = h.task_id
+        WHERE to_status = 'todo'
+          AND ($1::int IS NULL OR t.project_id = $1::int)
+     GROUP BY task_id
+     ),
+     finishes AS (
+       SELECT h.task_id, MIN(h.changed_at) AS done_at
+         FROM task_status_history h
+         JOIN tasks t ON t.id = h.task_id
+        WHERE h.to_status = 'done'
+          AND h.changed_at >= now() - ($2::int * INTERVAL '1 day')
+          AND ($1::int IS NULL OR t.project_id = $1::int)
+     GROUP BY h.task_id
+     )
+     SELECT ROUND(AVG(EXTRACT(EPOCH FROM (f.done_at - s.started_at)) / 3600)::numeric, 1)::text AS avg_lead_hours,
+            COUNT(*)::text AS samples
+       FROM finishes f JOIN starts s ON s.task_id = f.task_id
+      WHERE f.done_at >= s.started_at`,
+    [projectId, periodDays],
+  )
+  const r = result.rows[0] ?? { avg_lead_hours: null, samples: '0' }
+  return {
+    avg_lead_hours: r.avg_lead_hours === null ? null : Number(r.avg_lead_hours),
+    samples: Number(r.samples),
+    cov: coverage('task_status_history (todo→done)', periodDays, Number(r.samples)),
+  }
+}
+
+export interface VelocityRow {
+  label: string
+  done_count: number
+  window_days: number
+}
+
+/**
+ * Velocity: done transitions bucketed into sprint-length windows.
+ * Buckets are calendar-ordered [oldest … current].
+ */
+export async function velocity(
+  projectId: number | null,
+  periodDays: number,
+  sprintLengthDays = 14,
+): Promise<{ rows: VelocityRow[]; cov: ReportCoverage }> {
+  const result = await pool.query<{ label: string; done_count: string; window_days: string }>(
+    `SELECT to_char(date_trunc('day', d.bucket_end) - ($3::int * INTERVAL '1 day'), 'YYYY-MM-DD') || ' → ' || to_char(d.bucket_end, 'MM-DD') AS label,
+            d.done_count::text,
+            $3::int::text AS window_days
+       FROM (
+         SELECT gs.bucket_end,
+                COUNT(h.id) AS done_count
+           FROM generate_series(
+                  date_trunc('day', now()) - ($2::int * INTERVAL '1 day'),
+                  date_trunc('day', now()),
+                  ($3::int * INTERVAL '1 day')
+                ) AS gs(bucket_end)
+           LEFT JOIN task_status_history h
+             ON h.to_status = 'done'
+            AND h.changed_at > gs.bucket_end - ($3::int * INTERVAL '1 day')
+            AND h.changed_at <= gs.bucket_end
+           LEFT JOIN tasks t ON t.id = h.task_id
+          WHERE ($1::int IS NULL OR t.project_id = $1::int OR h.id IS NULL)
+       GROUP BY gs.bucket_end
+       ) d
+   ORDER BY d.bucket_end`,
+    [projectId, periodDays, sprintLengthDays],
+  )
+  const rows = result.rows.map((r) => ({
+    label: r.label,
+    done_count: Number(r.done_count),
+    window_days: Number(r.window_days),
+  }))
+  return { rows, cov: coverage('task_status_history (done/sprint bucket)', periodDays, rows.length) }
+}
+
+export interface BurndownPoint {
+  date: string
+  remaining: number
+}
+
+/**
+ * Burndown: count of currently-open tasks' remaining work over time is not
+ * reconstructable without snapshots, so we plot open-task count by day for
+ * the window: tasks created (or first seen) before day D and not yet done
+ * at day D. Approximation uses task_status_history: a task is "open" on day
+ * D if its first todo-entry ≤ D and its first done-entry is > D (or absent).
+ */
+export async function burndown(
+  projectId: number | null,
+  periodDays: number,
+): Promise<{ rows: BurndownPoint[]; cov: ReportCoverage }> {
+  const result = await pool.query<{ date: string; remaining: string }>(
+    `WITH days AS (
+       SELECT generate_series(
+                date_trunc('day', now()) - ($2::int * INTERVAL '1 day'),
+                date_trunc('day', now()),
+                INTERVAL '1 day'
+              )::date AS d
+     ),
+     first_todo AS (
+       SELECT h.task_id, MIN(h.changed_at)::date AS started
+         FROM task_status_history h
+         JOIN tasks t ON t.id = h.task_id
+        WHERE h.to_status = 'todo'
+          AND ($1::int IS NULL OR t.project_id = $1::int)
+     GROUP BY h.task_id
+     ),
+     first_done AS (
+       SELECT h.task_id, MIN(h.changed_at)::date AS finished
+         FROM task_status_history h
+         JOIN tasks t ON t.id = h.task_id
+        WHERE h.to_status = 'done'
+          AND ($1::int IS NULL OR t.project_id = $1::int)
+     GROUP BY h.task_id
+     )
+     SELECT to_char(days.d, 'YYYY-MM-DD') AS date,
+            COUNT(ft.task_id)::text AS remaining
+       FROM days
+       LEFT JOIN first_todo ft ON ft.started <= days.d
+       LEFT JOIN first_done fd ON fd.task_id = ft.task_id AND fd.finished <= days.d
+      WHERE ft.task_id IS NOT NULL AND fd.task_id IS NULL
+   GROUP BY days.d
+   ORDER BY days.d`,
+    [projectId, periodDays],
+  )
+  const rows = result.rows.map((r) => ({
+    date: r.date,
+    remaining: Number(r.remaining),
+  }))
+  return { rows, cov: coverage('task_status_history (open tasks/day)', periodDays, rows.length) }
+}
+
