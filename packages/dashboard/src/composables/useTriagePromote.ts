@@ -42,15 +42,14 @@ export function useTriagePromote(options?: UseTriagePromoteOptions) {
     error.value = null
     promotedTask.value = null
 
-    const token = import.meta.env['VITE_DASHBOARD_AGENT_TOKEN'] as string | undefined
-
     try {
-      // Call backend endpoint: PATCH /api/integrations/triage/:id/promote
+      // Cookie session auth (S18-SEC-03 #2642): the baked bearer token is
+      // retired; the HttpOnly oh_session cookie rides along automatically.
       const response = await fetch(`/api/integrations/triage/${encodeURIComponent(taskId)}/promote`, {
         method: 'PATCH',
+        credentials: 'include',
         headers: {
           'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
       })
 

@@ -1,7 +1,6 @@
 /// <reference types="vite/client" />
 
 interface ImportMetaEnv {
-  readonly VITE_DASHBOARD_AGENT_TOKEN: string
   readonly VITE_SQUAD_API_URL?: string
 }
 
