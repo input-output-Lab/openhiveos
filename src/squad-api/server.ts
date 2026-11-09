@@ -10,6 +10,7 @@ import { agentsRouter } from './routes/agents.js'
 import { healthRouter } from './routes/health.js'
 import { internalRouter } from './routes/internal.js'
 import { usageRouter } from './routes/usage.js'
+import { reportsRouter } from './routes/reports.js'
 import { sopsRouter } from './routes/sops.js'
 import { tasksRouter } from './routes/tasks.js'
 import { projectsRouter } from './routes/projects.js'
@@ -158,6 +159,11 @@ export function createSquadApiApp(): express.Application {
   // Auth enforced upstream by authMiddleware on /api/*.
   // Queries run via withReaderRole() — SELECT-only (SEC-A5).
   app.use('/api/usage', usageRouter)
+
+  // GET /api/reports/* — REST wrappers over the report service (S18-BE-04 #2566).
+  // Same generateReport code path as the MCP generate_report tool — identical
+  // JSON output (AC). Auth upstream; internal-only (2560 posture).
+  app.use('/api/reports', reportsRouter)
 
   // GET /api/integrations/status — Integration health status (ARCH-024)
   // Auth enforced upstream by authMiddleware on /api/*.
