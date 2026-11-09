@@ -17,10 +17,14 @@ supersedes:
   - "[[ARCH-015-llm-usage-tracking]] (v2 sections)"
 related:
   - "[[ARCH-019-sprint-9-api-surface]]"
-  - "[[ARCH-024-triage-integration]]"
+  - "[[ARCH-024-external-task-sync-clickup-async-queue]]"
 ---
 
 *This ADR supersedes ARCH-023 and the state-machine portions of ARCH-015. It records the S16–S18 evolution: the seven-state lifecycle (triage→todo→wip→review→pending-close→done, plus rework), the reviewer/approver role resolution with the fail-closed domain defaults (P2 ruling), the aging policy (7/14/30), the resolution field, and the usage-capture v2 architecture (S18-BE-01 ingestion + SEC-C9 v2 model-registry revision). Status: DRAFT pending owner review (Silas, Murphy).*
+
+---
+
+# ARCH-027: Task Lifecycle v2 (States, Roles, Aging) + Usage Capture v2 (SEC-C9 revision)
 
 ---
 
