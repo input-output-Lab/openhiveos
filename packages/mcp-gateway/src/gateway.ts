@@ -13,6 +13,9 @@
  * call as __agentSlug. The subprocess reads it per-call in GATEWAY_MODE.
  */
 import { createHash, timingSafeEqual } from 'node:crypto'
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { Pool } from 'pg'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
@@ -115,6 +118,30 @@ export async function resolveAgentSlug(pool: Pool, rawToken: string): Promise<st
   return row.slug
 }
 
+// ---------------------------------------------------------------------------
+// resolveSubprocessBinaryPath — S19-ARCH-01d (#2777): the orphan-storm fix.
+//
+// Pure decision function (unit-tested in tests/auth/subprocess-binary.test.ts):
+//   - absolute `raw`            → used as-is (Compose volume mounts)
+//   - relative `raw`            → resolved against REPO ROOT (never the
+//                                 ambient CWD — that was the recursion bug)
+//   - resolves to a gateway self-entrypoint (dist or src spelling)
+//                               → null (caller aborts: orphan-storm guard)
+// ---------------------------------------------------------------------------
+export function resolveSubprocessBinaryPath(opts: {
+  raw: string
+  repoRoot: string
+  selfEntrypoints: string[]
+}): string | null {
+  const isAbsolute = opts.raw.startsWith('/')
+  const resolved = isAbsolute
+    ? path.resolve(opts.raw)
+    : path.resolve(opts.repoRoot, opts.raw)
+  const self = opts.selfEntrypoints.map((p) => path.resolve(p))
+  if (self.includes(resolved)) return null
+  return resolved
+}
+
 export class Gateway {
   private readonly client: Client
   private readonly readyPromise: Promise<void>
@@ -171,14 +198,66 @@ export class Gateway {
     return this.client
   }
 
-  private async spawnAndConnect(): Promise<void> {
-    // SEC-D7: HEALTH_PORT must differ from the standalone mcp container (default 3007).
+  private async spawnAndConnect(): Promise<void> {    // SEC-D7: HEALTH_PORT must differ from the standalone mcp container (default 3007).
     const healthPort = process.env['HEALTH_PORT'] ?? '3007'
 
-    // MCP_BINARY_PATH: path to the MCP server binary spawned as a subprocess.
-    // Defaults to dist/index.js (relative, for local dev). Set to an absolute
-    // path in Compose via volume mount (e.g. /mcp-server/index.js).
-    const mcpBinaryPath = process.env['MCP_BINARY_PATH'] ?? 'dist/index.js'
+    // ---------------------------------------------------------------------------
+    // MCP_BINARY_PATH — S19-ARCH-01d (#2777): ABSOLUTE resolution + self-spawn
+    // guard. Spike 2640 root-caused BOTH orphan storms here: the relative
+    // default 'dist/index.js' resolved against the gateway's AMBIENT CWD, so a
+    // boot from packages/mcp-gateway spawned packages/mcp-gateway/dist/index.js
+    // — the gateway itself — which spawned another gateway, recursively.
+    //
+    // Fix (three layers, fail-fast before any process spawns):
+    //   1. Relative paths resolve against the REPO ROOT — located from THIS
+    //      file's real position (dist/gateway.js or src/gateway.ts via tsx),
+    //      never the ambient CWD. The default 'dist/index.js' therefore ALWAYS
+    //      means the real OpenHiveOS MCP server build, never the gateway.
+    //   2. Absolute input paths are accepted as-is (Compose volume mounts).
+    //   3. Self-spawn guard: if the resolved path IS the gateway's own
+    //      entrypoint (dist AND src spellings), abort at startup — recursion
+    //      is structurally impossible instead of operationally avoided.
+    // Decision logic lives in resolveSubprocessBinaryPath (pure, unit-tested).
+    // ---------------------------------------------------------------------------
+    const rawBinaryPath = process.env['MCP_BINARY_PATH'] ?? 'dist/index.js'
+    // Repo root: walk up from THIS file (works for dist/gateway.js AND
+    // src/gateway.ts under tsx — depth differs between the two, so no magic
+    // '..' count). Two anchors: the gateway's own package.json
+    // (@openhiveos/mcp-gateway) locates the package; the repo-root
+    // package.json (openhiveos) locates the repo.
+    const thisFile = fileURLToPath(import.meta.url)
+    let gwDir: string | null = null
+    let repoRoot: string | null = null
+    for (let dir = path.dirname(thisFile); dir !== path.dirname(dir); dir = path.dirname(dir)) {
+      try {
+        const pkg = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')) as { name?: string }
+        if (gwDir === null && pkg.name === '@openhiveos/mcp-gateway') gwDir = dir
+        if (pkg.name === 'openhiveos') { repoRoot = dir; break }
+      } catch {
+        // no package.json at this level — keep walking up
+      }
+    }
+    if (gwDir === null || repoRoot === null) {
+      console.error('[mcp-gateway] FATAL: could not locate the gateway package/repo root (walked up from ' + thisFile + ')')
+      process.exit(1)
+    }
+    const selfEntrypoints = [
+      path.join(gwDir, 'dist', 'index.js'), // compiled gateway
+      path.join(gwDir, 'src', 'index.ts'), // tsx dev-mode gateway
+    ]
+    const mcpBinaryPath = resolveSubprocessBinaryPath({
+      raw: rawBinaryPath,
+      repoRoot,
+      selfEntrypoints,
+    })
+    if (mcpBinaryPath === null) {
+      console.error(
+        `[mcp-gateway] FATAL: MCP_BINARY_PATH resolves to this gateway itself (${rawBinaryPath}). ` +
+        `Refusing to spawn — this recursion caused the orphan storms (spike 2640). ` +
+        `Set MCP_BINARY_PATH to the OpenHiveOS MCP server build (repo-root dist/index.js).`,
+      )
+      process.exit(1)
+    }
 
     const transport = new StdioClientTransport({
       command: 'node',
