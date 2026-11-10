@@ -37,7 +37,7 @@ import { handleUpdateProject, updateProjectSchema } from './utilities/update-pro
 import { handleQueryProjects, queryProjectsSchema } from './utilities/query-projects.js'
 import { handleGetProjectBoard, getProjectBoardSchema } from './utilities/get-project-board.js'
 import { handleCreateTask, createTaskSchema } from './utilities/create-task.js'
-import { handleUpdateTask, updateTaskSchema } from './utilities/update-task.js'
+import { handleUpdateTask, updateTaskSchema, runStepUp } from './utilities/update-task.js'
 import { handleLogTime, logTimeSchema } from './utilities/log-time.js'
 import { handleGenerateReport, generateReportSchema } from './utilities/generate-report.js'
 import { handleAuditHive, auditHiveSchema } from './utilities/audit-hive.js'
@@ -201,7 +201,13 @@ server.registerTool('update_task', { description: 'Update a task status, assigne
   // S19-ARCH-01a: the transition history row records the claimed persona and
   // the auth strength the gateway resolved for this call (migration 031).
   const identity = extractIdentityAudit(extra)
-  return { content: [{ type: 'text' as const, text: JSON.stringify(await handleUpdateTask(args, slug, identity)) }] }
+  // S19-ARCH-01c (#2776, ARCH-028): the human step-up callback. On gated
+  // roles (approver by default) this sends elicitation/create over the
+  // calling session; the gateway relays to the human in VS Code. The nonce
+  // round-trips so the gateway binds prompt→session (fail-closed routing).
+  const stepUpMeta = extra._meta?.['__stepUpNonce']
+  const stepUpNonce = typeof stepUpMeta === 'string' ? stepUpMeta : null
+  return { content: [{ type: 'text' as const, text: JSON.stringify(await handleUpdateTask(args, slug, identity, (ctx) => runStepUp({ ...ctx, stepUpNonce }, extra), stepUpNonce)) }] }
 })
 
 // log_time — write, requires agentSlug (assignee or project owner only; S17

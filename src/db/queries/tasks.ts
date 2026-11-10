@@ -106,6 +106,7 @@ export async function getTaskForActor(
   | undefined
   | {
       id: number
+      title: string
       status: TaskStatus
       assignee_agent_slug: string | null
       reviewer_agent_slug: string | null
@@ -124,6 +125,7 @@ export async function getTaskForActor(
   // assignee, nor reviewer. nova must fetch to act on pending-close → done.
   const result = await pool.query<{
     id: number
+    title: string
     status: TaskStatus
     assignee_agent_slug: string | null
     reviewer_agent_slug: string | null
@@ -131,7 +133,7 @@ export async function getTaskForActor(
     project_owner_agent_slug: string
     metadata: Record<string, unknown>
   }>(
-    `SELECT t.id, t.status, t.assignee_agent_slug, t.reviewer_agent_slug,
+    `SELECT t.id, t.title, t.status, t.assignee_agent_slug, t.reviewer_agent_slug,
             t.project_id, p.owner_agent_slug AS project_owner_agent_slug, t.metadata
      FROM tasks t
      JOIN projects p ON p.id = t.project_id

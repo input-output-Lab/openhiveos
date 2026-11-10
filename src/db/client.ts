@@ -58,6 +58,8 @@ export interface ActorIdentityContext {
   claimedPersona?: string | null
   /** Auth path: 'bearer' | 'dev' | 'session' | 'shared_token' | 'unverified'. */
   authStrength?: string
+  /** Operator label stamped after human step-up approval (ARCH-028). */
+  stepUpUser?: string
 }
 
 const ACTOR_SLUG_RE = /^(system:[a-z0-9_-]+|[a-z][a-z0-9_-]*)$/
@@ -90,6 +92,15 @@ export async function withActor<T>(
   ) {
     throw new Error(`[db] withActor: invalid auth strength`)
   }
+  // Step-up operator label (ARCH-028): same shape as the migration-032 CHECK
+  // domain — 1..64 chars, no whitespace.
+  const stepUpUser = identity?.stepUpUser
+  if (
+    stepUpUser !== undefined &&
+    (stepUpUser.length < 1 || stepUpUser.length > 64 || /\s/.test(stepUpUser))
+  ) {
+    throw new Error(`[db] withActor: invalid step-up user`)
+  }
   const client = await pool.connect()
   try {
     await client.query('BEGIN')
@@ -99,6 +110,9 @@ export async function withActor<T>(
     }
     if (strength) {
       await client.query(`SET LOCAL hive.auth_strength = '${strength}'`)
+    }
+    if (stepUpUser) {
+      await client.query(`SET LOCAL hive.step_up_user = '${stepUpUser}'`)
     }
     // CRITICAL: fn receives THIS client and must execute its queries on it.
     // SET LOCAL is connection-scoped — running fn's queries via pool.query()

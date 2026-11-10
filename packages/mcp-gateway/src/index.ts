@@ -32,10 +32,28 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import {
   ListToolsRequestSchema,
   CallToolRequestSchema,
+  ElicitRequestSchema,
+  ElicitResultSchema,
 } from '@modelcontextprotocol/sdk/types.js'
 import { Gateway, resolveAgentSlug } from './gateway.js'
 import { assertDevAuthAllowed, DEV_ACTOR_SLUG } from './dev-auth.js'
 import { extractPersonaClaim, buildProvenanceMeta, META_AGENT_SLUG_KEY, META_CLAIMED_PERSONA_KEY, META_AUTH_STRENGTH_KEY, type IdentityAudit } from './auth-context.js'
+import { SessionRegistry } from './session-state.js'
+
+// ---------------------------------------------------------------------------
+// S19-ARCH-01c: gateway session registry + step-up operator label.
+// The gateway goes stateful (ARCH-028 trade-off 1): sessions live in process
+// memory, bound to the bearer-resolved agent slug. GATEWAY_OPERATOR names the
+// human for step-up audit rows — a LABEL, not a control (single-operator
+// loopback premise). Unset → 'operator' with a boot warning.
+// ---------------------------------------------------------------------------
+const sessions = new SessionRegistry()
+const OPERATOR_LABEL = (() => {
+  const raw = process.env['GATEWAY_OPERATOR']
+  if (raw && raw.length >= 1 && raw.length <= 64 && !/\s/.test(raw)) return raw
+  console.error('[mcp-gateway] WARNING: GATEWAY_OPERATOR unset — step-up audit rows will record the generic label "operator"')
+  return 'operator'
+})()
 
 // ---------------------------------------------------------------------------
 // Boot-time validation (SEC-D2, SEC-D10)
@@ -347,6 +365,33 @@ app.post('/mcp', mcpRateLimiter, resolveAgentFromBearer, express.json({ limit: '
   // S19-ARCH-01a: auth path stamped by the same middleware — always present.
   const authStrength = (res.locals['authStrength'] as IdentityAudit['authStrength']) ?? 'unverified'
 
+  // ---------------------------------------------------------------------------
+  // S19-ARCH-01c: STATEFUL SESSIONS (ARCH-028 Decision 1).
+  //   initialize → register session, return Mcp-Session-Id header.
+  //   everything else → session header REQUIRED and must belong to the
+  //   bearer-resolved agent (session-fixation guard: stolen header without
+  //   the matching token is a 404, indistinguishable from no session).
+  // ---------------------------------------------------------------------------
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const bodyMethod = (req.body as any)?.method as string | undefined
+  const isInitialize = bodyMethod === 'initialize'
+  const presentedSessionId = req.headers['mcp-session-id']
+  const presentedSession = typeof presentedSessionId === 'string' ? presentedSessionId : undefined
+
+  let session: ReturnType<SessionRegistry['assertSessionAccess']>
+  if (isInitialize && presentedSession === undefined) {
+    session = sessions.register(agentSlug)
+  } else if (presentedSession !== undefined) {
+    session = sessions.assertSessionAccess(presentedSession, agentSlug)
+    if (!session) {
+      res.status(404).json({ error: 'Session not found. Re-initialize.' })
+      return
+    }
+  } else {
+    res.status(400).json({ error: 'Missing Mcp-Session-Id header. Initialize first.' })
+    return
+  }
+
   const client = gateway.getClient()
 
   const server = new Server(
@@ -358,6 +403,35 @@ app.post('/mcp', mcpRateLimiter, resolveAgentFromBearer, express.json({ limit: '
     return client.listTools()
   })
 
+  // ---------------------------------------------------------------------------
+  // S19-ARCH-01c: STEP-UP RELAY (ARCH-028 Decision 2).
+  // The subprocess elicits with the nonce we minted; we route the prompt to
+  // THIS session's stream and stamp the operator label on the human's
+  // answer. FAIL-CLOSED: unknown/expired/replayed nonce → decline — the
+  // subprocess treats that exactly like a human "no". The gateway NEVER
+  // answers on the client's behalf; it only relays.
+  // ---------------------------------------------------------------------------
+  server.setRequestHandler(ElicitRequestSchema, async (request) => {
+    const nonce = (request.params._meta as Record<string, unknown> | undefined)?.['__stepUpNonce']
+    const bound = typeof nonce === 'string' ? sessions.consumeNonce(nonce, agentSlug) : null
+    if (!bound) return { action: 'decline' as const }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const downstream = (server as any).transport as { sendRequest?: (r: unknown, s: unknown, o?: unknown) => Promise<any> } | undefined
+    if (!downstream?.sendRequest) return { action: 'decline' as const }
+    try {
+      const result = await downstream.sendRequest(request, ElicitResultSchema, { timeout: 120_000 })
+      if (result.action === 'accept') {
+        // Stamp the operator label: the subprocess records it on the history
+        // row (step_up_user). A LABEL for audit readability, not a control.
+        result._meta = { ...(result._meta ?? {}), __stepUpUser: OPERATOR_LABEL }
+      }
+      return result
+    } catch {
+      // No stream / client went away / timeout → no human answered → decline.
+      return { action: 'decline' as const }
+    }
+  })
+
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     // ARCH-021: inject __agentSlug into _meta so the subprocess can resolve
     // identity per-call in GATEWAY_MODE without AGENT_TOKEN.
@@ -367,25 +441,21 @@ app.post('/mcp', mcpRateLimiter, resolveAgentFromBearer, express.json({ limit: '
     // tool's inputSchema (z4mini.object, strip mode) and silently removes unknown
     // keys before the handler receives args — causing the "missing __agentSlug" error.
     //
-    // S19-ARCH-01a: lift the optional `persona` claim into _meta.__claimedPersona.
-    // The gateway OVERWRITES any client-supplied __claimedPersona in _meta —
-    // exactly like __agentSlug, the claim's provenance is gateway-resolved
-    // from the (still spoofable, by design) tool argument, never from client
-    // _meta. Read from the RAW args before the claim key reaches the
-    // subprocess: it stays in arguments so the normal schema sees it only if
-    // a tool declares it; the subprocess reads it from _meta.
+    // S19-ARCH-01a/01b: buildProvenanceMeta assembles client _meta FIRST and
+    // gateway claims LAST (client forgery always loses the merge).
+    // S19-ARCH-01c: mint the step-up nonce — the subprocess echoes it back on
+    // its elicitation so we can bind the prompt to THIS session.
     const rawArgs = (request.params.arguments ?? null) as Record<string, unknown> | null
     const claimedPersona = extractPersonaClaim(rawArgs)
+    const stepUpNonce = request.params.name === 'update_task' ? sessions.mintNonce(session.sessionId, agentSlug) : null
     const augmentedParams = {
       ...request.params,
       // SDK type: arguments is object | undefined (never null)
       ...(rawArgs !== null ? { arguments: rawArgs } : {}),
-      _meta: {
-        ...(request.params._meta ?? {}),
-        __agentSlug: agentSlug,
-        __claimedPersona: claimedPersona,
-        __authStrength: authStrength,
-      },
+      _meta: buildProvenanceMeta(request.params._meta, { claimedPersona, authStrength }, agentSlug),
+    }
+    if (stepUpNonce !== null) {
+      ;(augmentedParams._meta as Record<string, unknown>)['__stepUpNonce'] = stepUpNonce
     }
 
     // T1-2 + S16-DB-03: log tool invocation (fire-and-forget, enriched)
@@ -410,7 +480,10 @@ app.post('/mcp', mcpRateLimiter, resolveAgentFromBearer, express.json({ limit: '
       // The SDK types params without it; the handler receives the full message.
       const requestIdRaw: unknown = (request as unknown as { id?: string | number }).id
       logToolInvocation(agentSlug, request.params.name, 'streamable_http', durationMs, success, errorClass, {
-        sessionId: null, // stateless transport: correlation via request_id
+        // S19-ARCH-01c: stateful sessions — correlation is now by session id
+        // (v_session_active_time unaffected: it filters session_id IS NOT NULL,
+        // so legacy NULL rows stay excluded).
+        sessionId: session.sessionId,
         requestId: requestIdRaw !== undefined ? String(requestIdRaw) : null,
         arguments: rawArgs,
         responseBytes,
@@ -419,15 +492,19 @@ app.post('/mcp', mcpRateLimiter, resolveAgentFromBearer, express.json({ limit: '
     }
   })
 
-  // Stateless mode: sessionIdGenerator: undefined — no session tracking or validation.
-  // The gateway is a proxy; the upstream MCP subprocess maintains its own state.
-  // Each HTTP request is handled independently. This matches the SDK's stateless pattern.
+  // S19-ARCH-01c: STATEFUL mode — per-session transport (ARCH-028 Decision 1).
+  // GET on this session opens the SSE stream that carries server→client
+  // requests (elicitation); DELETE ends the session. onclose evicts.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const transport = new (StreamableHTTPServerTransport as any)({ sessionIdGenerator: undefined })
-
-  res.on('close', () => {
-    void (transport as { close(): Promise<void> }).close()
+  const transport = new (StreamableHTTPServerTransport as any)({
+    sessionIdGenerator: () => session.sessionId,
+    onsessioninitialized: (sid: string) => {
+      void sid // session already registered before connect
+    },
   })
+  transport.onclose = () => {
+    sessions.end(session.sessionId)
+  }
 
   // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
   await server.connect(transport)
@@ -437,12 +514,85 @@ app.post('/mcp', mcpRateLimiter, resolveAgentFromBearer, express.json({ limit: '
 })
 
 // ---------------------------------------------------------------------------
-// GET /mcp — reject SSE fallback probe from VS Code MCP client.
-// VS Code falls back to GET /mcp as SSE when POST /mcp returns non-2xx.
-// Return 405 so VS Code gets a clean "not supported" rather than 404 HTML.
+// GET /mcp — S19-ARCH-01c: open the session's SSE stream (server→client
+// requests, i.e. elicitation delivery to VS Code). Requires a valid session
+// bound to the bearer identity. Session-less GETs keep the legacy 405
+// (VS Code fallback probe) so pre-session clients behave exactly as before.
 // ---------------------------------------------------------------------------
-app.get('/mcp', (_req: Request, res: Response) => {
-  res.status(405).json({ error: 'SSE transport not supported on /mcp. Use POST /mcp (StreamableHTTP).' })
+app.get('/mcp', mcpRateLimiter, resolveAgentFromBearer, async (req: Request, res: Response) => {
+  await gateway.waitUntilReady()
+
+  const agentSlug = res.locals['agentSlug'] as string
+  const presentedSessionId = req.headers['mcp-session-id']
+  const sessionId = typeof presentedSessionId === 'string' ? presentedSessionId : undefined
+  if (sessionId === undefined) {
+    res.status(405).json({ error: 'SSE transport not supported without a session. Use POST /mcp (StreamableHTTP).' })
+    return
+  }
+  const session = sessions.assertSessionAccess(sessionId, agentSlug)
+  if (!session) {
+    res.status(404).json({ error: 'Session not found. Re-initialize.' })
+    return
+  }
+
+  const client = gateway.getClient()
+  const server = new Server(
+    { name: `openhiveos-${agentSlug}`, version: '1.0.0' },
+    { capabilities: { tools: {} } },
+  )
+
+  // Re-attach the step-up relay on this session's server instance so
+  // elicitation requests arriving on the GET-established transport resolve.
+  server.setRequestHandler(ElicitRequestSchema, async (request) => {
+    const nonce = (request.params._meta as Record<string, unknown> | undefined)?.['__stepUpNonce']
+    const bound = typeof nonce === 'string' ? sessions.consumeNonce(nonce, agentSlug) : null
+    if (!bound) return { action: 'decline' as const }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const downstream = (server as any).transport as { sendRequest?: (r: unknown, s: unknown, o?: unknown) => Promise<any> } | undefined
+    if (!downstream?.sendRequest) return { action: 'decline' as const }
+    try {
+      const result = await downstream.sendRequest(request, ElicitResultSchema, { timeout: 120_000 })
+      if (result.action === 'accept') {
+        result._meta = { ...(result._meta ?? {}), __stepUpUser: OPERATOR_LABEL }
+      }
+      return result
+    } catch {
+      return { action: 'decline' as const }
+    }
+  })
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const transport = new (StreamableHTTPServerTransport as any)({
+    sessionIdGenerator: () => session.sessionId,
+  })
+  transport.onclose = () => {
+    sessions.end(session.sessionId)
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
+  await server.connect(transport)
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
+  await (transport as any).handleRequest(req, res, req.body)
+})
+
+// ---------------------------------------------------------------------------
+// DELETE /mcp — S19-ARCH-01c: client-initiated session termination.
+// ---------------------------------------------------------------------------
+app.delete('/mcp', mcpRateLimiter, resolveAgentFromBearer, async (req: Request, res: Response) => {
+  const agentSlug = res.locals['agentSlug'] as string
+  const presentedSessionId = req.headers['mcp-session-id']
+  const sessionId = typeof presentedSessionId === 'string' ? presentedSessionId : undefined
+  if (sessionId === undefined) {
+    res.status(400).json({ error: 'Missing Mcp-Session-Id header.' })
+    return
+  }
+  const session = sessions.assertSessionAccess(sessionId, agentSlug)
+  if (!session) {
+    res.status(404).json({ error: 'Session not found.' })
+    return
+  }
+  sessions.end(sessionId)
+  res.status(200).json({ status: 'session ended' })
 })
 
 // ---------------------------------------------------------------------------
