@@ -412,7 +412,8 @@ async function createSessionPair(sessionId: string, agentSlug: string): Promise<
           arguments: null,
           responseBytes,
         },
-        { claimedPersona: null, authStrength },
+        // R1: auth strength is per-session (registry map), refreshed per POST.
+        { claimedPersona: null, authStrength: sessionAuthStrength.get(sessionId) ?? 'unverified' },
       )
     }
   })
