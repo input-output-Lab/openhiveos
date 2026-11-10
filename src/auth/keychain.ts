@@ -24,10 +24,13 @@
  *     WITHOUT a value reads from the TTY (interactive prompt), not stdin —
  *     the stdin approach hangs non-interactive callers. Passing the token
  *     as argv exposes it transiently in process listings to same-user
- *     processes only — the SAME trust boundary as the keychain item itself
- *     (any same-user process can read items via the security CLI). Given
- *     spike 2640's ruling (this module is hygiene, not security), the
- *     transient argv exposure is an acceptable, documented trade.
+ *     processes only — a NEW transient capture surface within an unchanged
+ *     trust boundary (any same-user process can also read keychain items
+ *     via the security CLI). Capture requires polling ps during the exec
+ *     window — a strictly narrower attack window than the plaintext-at-rest
+ *     status quo (persistent files are auditable artifacts; argv is not).
+ *     Locksmith PR-58 review, 2026-11-10: accepted for hygiene scope with
+ *     this precision condition.
  */
 
 import { execFileSync } from 'node:child_process'
