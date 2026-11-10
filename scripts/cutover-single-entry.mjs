@@ -50,8 +50,16 @@ if (!INPUT_MODE && !TOKEN) {
   console.error('       node scripts/cutover-single-entry.mjs --input-mode [--dry-run]')
   process.exit(1)
 }
-if (TOKEN && !/^[a-f0-9.]{64,}$/i.test(TOKEN)) {
-  console.error('FATAL: --token must be the credential string (salt.secret or 64-hex).')
+// S19 post-cutover fix: the unified /mcp entry resolves identity from the
+// agents table (salt.secret bearer), NOT the legacy gateway token. A 64-hex
+// MCP_GATEWAY_TOKEN here authenticates /sse only and locks every client out
+// of /mcp with 401 (VS Code then falls back to OAuth discovery). Accept only
+// the ARCH-008 Decision 7 shape: <32-hex-salt>.<64-hex-secret>.
+if (TOKEN && !/^[a-f0-9]{32}\.[a-f0-9]{64}$/i.test(TOKEN)) {
+  console.error('FATAL: --token must be an AGENT bearer (salt.secret: 32-hex + dot + 64-hex).')
+  console.error('       The legacy MCP_GATEWAY_TOKEN is NOT valid for /mcp — it only')
+  console.error('       authenticates the /sse?token= path. Provision via:')
+  console.error('         npx tsx src/scripts/provision-agent-token.ts <agent-slug> --token-only')
   process.exit(1)
 }
 
