@@ -659,6 +659,49 @@ app.get('/sse', sseRateLimiter, validateTokenQuery, async (req: Request, res: Re
 
   const client = gateway.getClient()
 
+  // ---------------------------------------------------------------------------
+  // S19-ARCH-01e (#2778): OPTIONAL per-connection identity on the legacy /sse
+  // handshake. ARCH-016 compatibility rule: the contract (GET /sse?token= +
+  // POST /message?sessionId=, shared MCP_GATEWAY_TOKEN) is unchanged — agent
+  // and persona query params are OPTIONAL and absent params behave exactly as
+  // before (anonymous 'bridge' actor).
+  //
+  //   agent=<slug>    — resolved against the live agents table at handshake.
+  //                     Unresolvable → connection proceeds ANONYMOUS (bridge
+  //                     actor), never rejected: the shared token is the only
+  //                     credential, so identity here grants no privilege —
+  //                     it enriches the audit trail and the subprocess's
+  //                     per-call context. Fail-open to label, fail-closed
+  //                     to privilege.
+  //   persona=<label> — claimed persona label (same spoofable-by-design
+  //                     carve-out as the /mcp persona argument, ARCH-026).
+  //
+  // The binding lives for the life of the SSE connection and feeds BOTH the
+  // tool_invocations identity columns AND the subprocess _meta injection —
+  // closing the 'identity does not flow on /sse' gap end to end.
+  // ---------------------------------------------------------------------------
+  const rawAgent = req.query['agent']
+  const rawPersona = req.query['persona']
+  let sseAgent: string | null = null
+  if (typeof rawAgent === 'string' && /^[a-z][a-z0-9_-]{0,63}$/.test(rawAgent)) {
+    try {
+      const { rows } = await pool.query<{ slug: string }>(
+        'SELECT slug FROM agents WHERE slug = $1 AND active = true LIMIT 1',
+        [rawAgent],
+      )
+      if (rows.length > 0) sseAgent = rows[0]!.slug
+    } catch {
+      // DB hiccup → anonymous; never block the connection on identity.
+    }
+  }
+  let ssePersona: string | null = null
+  if (typeof rawPersona === 'string' && /^[a-z][a-z0-9_-]{0,63}$/.test(rawPersona)) {
+    ssePersona = rawPersona
+  }
+  if (rawAgent !== undefined && sseAgent === null) {
+    console.warn(`[mcp-gateway] /sse handshake: agent='${String(rawAgent).slice(0, 40)}' not resolved — proceeding as anonymous bridge actor`)
+  }
+
   // One Server instance per Bridge connection — proxies all tool calls upstream.
   const server = new Server(
     { name: 'mcp-gateway', version: '1.0.0' },
@@ -666,10 +709,9 @@ app.get('/sse', sseRateLimiter, validateTokenQuery, async (req: Request, res: Re
   )
 
   server.setRequestHandler(ListToolsRequestSchema, async (request) => {
-    // S19-ARCH-01b: SSE discovery is audited too — shared_token strength,
-    // bridge actor (identity resolution on /sse is deferred per Silas
-    // ARCH-024 ruling; see the callTool handler note below). Same enrichment
-    // as the /mcp tools/list row: duration + response size + request id.
+    // S19-ARCH-01b/01e: SSE discovery is audited too — shared_token strength,
+    // bound handshake agent when provided (anonymous 'bridge' otherwise).
+    // Same enrichment as the /mcp tools/list row.
     const start = Date.now()
     let success = true
     let errorClass: string | null = null
@@ -685,7 +727,7 @@ app.get('/sse', sseRateLimiter, validateTokenQuery, async (req: Request, res: Re
     } finally {
       const requestIdRaw: unknown = (request as unknown as { id?: string | number }).id
       logToolInvocation(
-        'bridge',
+        sseAgent ?? 'bridge',
         'tools/list',
         'sse',
         Date.now() - start,
@@ -697,41 +739,62 @@ app.get('/sse', sseRateLimiter, validateTokenQuery, async (req: Request, res: Re
           arguments: null,
           responseBytes,
         },
-        { claimedPersona: null, authStrength: 'shared_token' },
+        { claimedPersona: ssePersona, authStrength: 'shared_token' },
       )
     }
   })
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
-    // T1-3: log tool invocation to tool_invocations table (fire-and-forget)
-    // DATA QUALITY GAP: agent_slug defaulted to 'bridge'; session registry
-    // enhancement (linking SSE sessions to calling agent identity) deferred
-    // per Silas ARCH-024 ruling 2026-06-14. Future work: resolve real agent
-    // slug from session state instead of hardcoded fallback.
-    const agentSlugForLogging = 'bridge'
+    // S19-ARCH-01e: identity now FLOWS on /sse. The handshake binding
+    // (optional agent + persona) feeds both the audit row and the subprocess
+    // _meta — the subprocess can resolve identity per-call on the Bridge path
+    // exactly like /mcp (same sideband keys, same provenance model: the
+    // gateway is the source, client input cannot forge it).
+    const agentSlugForLogging = sseAgent ?? 'bridge'
     const start = Date.now()
     let success = true
     let errorClass: string | null = null
 
+    // Inject identity into _meta (protocol sideband — same mechanism as /mcp).
+    // Anonymous bridges keep the historical behavior: no _meta, subprocess
+    // tools that require identity reject as before (fail-closed).
+    const augmentedParams = sseAgent
+      ? {
+          ...request.params,
+          _meta: {
+            ...(request.params._meta ?? {}),
+            __agentSlug: sseAgent,
+            __claimedPersona: ssePersona,
+            __authStrength: 'shared_token' as const,
+          },
+        }
+      : request.params
+
     try {
-      return await client.callTool(request.params)
+      return await client.callTool(augmentedParams)
     } catch (err) {
       success = false
       errorClass = err instanceof Error ? err.constructor.name : 'UnknownError'
       throw err
     } finally {
       const durationMs = Date.now() - start
-      // S19-ARCH-01a: the shared /sse Bridge token is a single credential for
-      // every integration — weaker than per-agent bearer, stamped as such so
-      // the audit trail distinguishes Bridge calls from agent calls.
+      // S19-ARCH-01a/01e: the shared /sse token is a single credential for
+      // every integration — weaker than per-agent bearer, stamped as such.
       logToolInvocation(agentSlugForLogging, request.params.name, 'sse', durationMs, success, errorClass, undefined, {
-        claimedPersona: null,
+        claimedPersona: ssePersona,
         authStrength: 'shared_token',
       })
     }
   })
 
-  const transport = new SSEServerTransport('/message', res)
+  // S19-ARCH-01e: carry the shared token on the announced /message endpoint —
+  // the SDK appends sessionId to this path, so SDK-based clients (which cannot
+  // add query params to the POST themselves) authenticate /message without
+  // any client change. The token is already known to the client (it just
+  // passed ?token= on the handshake); this does not widen the surface.
+  // SEC-D3: the token stays out of gateway logs (validateTokenQuery deletes
+  // it from req.query before any logging path).
+  const transport = new SSEServerTransport(`/message?token=${rawToken}`, res)
   const sessionId = transport.sessionId
 
   transports.set(sessionId, transport)
@@ -763,7 +826,14 @@ app.post('/message', messageRateLimiter, validateTokenQuery, express.raw({ type:
     return
   }
 
-  await transport.handlePostMessage(req, res)
+  // S19-ARCH-01e fix (pre-existing Sprint 6 bug surfaced by the 01e test):
+  // express.raw() already consumed the request stream, so handlePostMessage's
+  // internal getRawBody(req) hit 'stream is not readable' on every POST —
+  // the legacy /sse path could never complete a real JSON-RPC call (consistent
+  // with zero sse rows ever recorded in tool_invocations). Pass the body
+  // through as PARSED JSON (parsedBody) — a raw Buffer would fail the
+  // message schema on the other side.
+  await transport.handlePostMessage(req, res, JSON.parse(req.body))
 })
 
 // ---------------------------------------------------------------------------
