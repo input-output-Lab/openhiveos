@@ -76,6 +76,35 @@ Revisit on a second operator or non-loopback exposure.
 4. **`step_up_user` is a label, not an identity proof.** Same epistemic status as the persona claim: the operator label names the human for audit readability; on a single-operator loopback machine this is honest. A second operator makes this insufficient → OAuth trigger.
 5. **Gateway `tool_invocations` rows do not record the step-up.** The gateway cannot see approval semantics (and must not parse them); the authoritative step-up record is the history row. Documented limit.
 
+## Empirical Addendum — First Production Exercise (2026-11-10)
+
+The gate ran live during the S19 finalize batch (6 `pending-close → done`
+transitions, all approved by the operator via elicitation). Two findings the
+STRIDE addendum did not model, both recorded as threat-model additions —
+neither is a code defect:
+
+1. **Relay-latency timeout race (T4 surface, operational variant).** When the
+   human approval travels through an agent-relayed path (chat dialog → agent
+   → terminal) rather than direct terminal input, the round trip can exceed
+   `GATEWAY_STEPUP_TIMEOUT_MS`. Two of eight live attempts timed out
+   client-side; one of those had already succeeded server-side (the approval
+   raced through before the client gave up). Fail-closed held in every case
+   (timeouts read as decline; the `done → done` rejection proved idempotent
+   protection). Operational rule: **verify server state before retrying any
+   timed-out gated call**.
+
+2. **Timeout configuration is gate governance.** Raising
+   `GATEWAY_STEPUP_TIMEOUT_MS` to reduce relay friction weakens the gate's
+   resistance to an in-session agent wearing down the operator (the approval
+   window widens). Treat changes to this value as control changes: document
+   the change, the reason, and who requested it alongside the deployment
+   notes. Default 120 s stands.
+
+Confirmed fail-closed behaviors from the live run: empty input reads as
+decline; nonce replay/absence reads as decline; 24/24 session-strength history
+rows carry `step_up_user` attribution.
+
+
 ## Revisit Triggers
 
 - A second operator, or any non-loopback exposure → OAuth scope gate (ARCH-026 trigger, unchanged).
