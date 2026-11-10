@@ -7,7 +7,7 @@ import { hybridRank } from '../search/bm25.js'
 export const searchMemorySchema = z.object({
   query: z.string().min(1),
   limit: z.number().int().positive().max(20).default(5),
-  metadata_filter: z.record(z.string()).optional(),
+  metadata_filter: z.record(z.string(), z.string()).optional(),
 })
 
 export type SearchMemoryInput = z.infer<typeof searchMemorySchema>

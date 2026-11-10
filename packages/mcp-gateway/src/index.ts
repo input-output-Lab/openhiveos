@@ -32,10 +32,27 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import {
   ListToolsRequestSchema,
   CallToolRequestSchema,
+  ElicitResultSchema,
 } from '@modelcontextprotocol/sdk/types.js'
 import { Gateway, resolveAgentSlug } from './gateway.js'
 import { assertDevAuthAllowed, DEV_ACTOR_SLUG } from './dev-auth.js'
 import { extractPersonaClaim, buildProvenanceMeta, META_AGENT_SLUG_KEY, META_CLAIMED_PERSONA_KEY, META_AUTH_STRENGTH_KEY, type IdentityAudit } from './auth-context.js'
+import { SessionRegistry } from './session-state.js'
+
+// ---------------------------------------------------------------------------
+// S19-ARCH-01c: gateway session registry + step-up operator label.
+// The gateway goes stateful (ARCH-028 trade-off 1): sessions live in process
+// memory, bound to the bearer-resolved agent slug. GATEWAY_OPERATOR names the
+// human for step-up audit rows — a LABEL, not a control (single-operator
+// loopback premise). Unset → 'operator' with a boot warning.
+// ---------------------------------------------------------------------------
+const sessions = new SessionRegistry()
+const OPERATOR_LABEL = (() => {
+  const raw = process.env['GATEWAY_OPERATOR']
+  if (raw && raw.length >= 1 && raw.length <= 64 && !/\s/.test(raw)) return raw
+  console.error('[mcp-gateway] WARNING: GATEWAY_OPERATOR unset — step-up audit rows will record the generic label "operator"')
+  return 'operator'
+})()
 
 // ---------------------------------------------------------------------------
 // Boot-time validation (SEC-D2, SEC-D10)
@@ -186,6 +203,13 @@ function extractSurface(params: { _meta?: Record<string, unknown> }): string {
  * single join at write time so budget/analytics rollups skip it at read time.
  * Failures in this function must NOT crash or corrupt the upstream
  * tool call response. Errors are logged to stderr for operator inspection.
+ *
+ * S19-ARCH-01b: also records protocol-level calls (tools/list) — the
+ * discovery surface previously left no audit trace. These rows carry
+ * tool_name='tools/list' so every row stays attributable to the auth path
+ * that produced it; they have no task attribution (task_id/project_id NULL),
+ * and /mcp rows have session_id NULL so the worklog derivation view
+ * (v_session_active_time filters session_id IS NOT NULL) is unaffected.
  */
 function logToolInvocation(
   agentSlug: string,
@@ -339,14 +363,15 @@ const mcpRateLimiter = rateLimit({
   message: { error: 'Too many requests. Retry later.' },
 })
 
-app.post('/mcp', mcpRateLimiter, resolveAgentFromBearer, express.json({ limit: '4mb' }), async (req: Request, res: Response) => {
-  await gateway.waitUntilReady()
-
-  // ARCH-021: agentSlug was resolved from the Bearer token by resolveAgentFromBearer.
-  const agentSlug = res.locals['agentSlug'] as string
-  // S19-ARCH-01a: auth path stamped by the same middleware — always present.
-  const authStrength = (res.locals['authStrength'] as IdentityAudit['authStrength']) ?? 'unverified'
-
+// ---------------------------------------------------------------------------
+// S19-ARCH-01c-R1 (FIND-2 fix): ONE Server+transport per SESSION, created at
+// initialize and stored in the registry. StreamableHTTP stateful mode
+// requires the same transport instance across every request of a session —
+// a fresh instance rejects non-initialize requests (SDK validateSession:
+// !initialized → 400 'Server not initialized'). POST and GET route through
+// the STORED pair; onclose evicts the session.
+// ---------------------------------------------------------------------------
+async function createSessionPair(sessionId: string, agentSlug: string): Promise<void> {
   const client = gateway.getClient()
 
   const server = new Server(
@@ -354,8 +379,43 @@ app.post('/mcp', mcpRateLimiter, resolveAgentFromBearer, express.json({ limit: '
     { capabilities: { tools: {} } },
   )
 
-  server.setRequestHandler(ListToolsRequestSchema, async () => {
-    return client.listTools()
+  server.setRequestHandler(ListToolsRequestSchema, async (request) => {
+    // S19-ARCH-01b: the discovery surface is now audited like invocations —
+    // claim-provenance recording in tools/list is part of the Tier-3 scope.
+    // No arguments to fingerprint; duration + response size + request id for
+    // correlation; auth path is the resolved authStrength so every protocol
+    // call is attributable.
+    const start = Date.now()
+    let success = true
+    let errorClass: string | null = null
+    let responseBytes: number | null = null
+    try {
+      const result = await client.listTools()
+      responseBytes = JSON.stringify(result ?? {}).length
+      return result
+    } catch (err) {
+      success = false
+      errorClass = err instanceof Error ? err.constructor.name : 'UnknownError'
+      throw err
+    } finally {
+      const requestIdRaw: unknown = (request as unknown as { id?: string | number }).id
+      logToolInvocation(
+        agentSlug,
+        'tools/list',
+        'streamable_http',
+        Date.now() - start,
+        success,
+        errorClass,
+        {
+          sessionId: null,
+          requestId: requestIdRaw !== undefined ? String(requestIdRaw) : null,
+          arguments: null,
+          responseBytes,
+        },
+        // R1: auth strength is per-session (registry map), refreshed per POST.
+        { claimedPersona: null, authStrength: sessionAuthStrength.get(sessionId) ?? 'unverified' },
+      )
+    }
   })
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
@@ -363,36 +423,31 @@ app.post('/mcp', mcpRateLimiter, resolveAgentFromBearer, express.json({ limit: '
     // identity per-call in GATEWAY_MODE without AGENT_TOKEN.
     // _meta is a protocol-level sideband — it is NOT subject to tool inputSchema
     // validation and will not be stripped by z.object() in the MCP SDK parse layer.
-    // Injecting into arguments was incorrect: the SDK's safeParseAsync runs the
-    // tool's inputSchema (z4mini.object, strip mode) and silently removes unknown
-    // keys before the handler receives args — causing the "missing __agentSlug" error.
     //
-    // S19-ARCH-01a: lift the optional `persona` claim into _meta.__claimedPersona.
-    // The gateway OVERWRITES any client-supplied __claimedPersona in _meta —
-    // exactly like __agentSlug, the claim's provenance is gateway-resolved
-    // from the (still spoofable, by design) tool argument, never from client
-    // _meta. Read from the RAW args before the claim key reaches the
-    // subprocess: it stays in arguments so the normal schema sees it only if
-    // a tool declares it; the subprocess reads it from _meta.
+    // S19-ARCH-01a/01b: buildProvenanceMeta assembles client _meta FIRST and
+    // gateway claims LAST (client forgery always loses the merge).
+    // S19-ARCH-01c: mint the step-up nonce — the subprocess echoes it back on
+    // its elicitation so we can bind the prompt to THIS session.
     const rawArgs = (request.params.arguments ?? null) as Record<string, unknown> | null
     const claimedPersona = extractPersonaClaim(rawArgs)
+    const stepUpNonce = request.params.name === 'update_task' ? sessions.mintNonce(sessionId, agentSlug) : null
     const augmentedParams = {
       ...request.params,
       // SDK type: arguments is object | undefined (never null)
       ...(rawArgs !== null ? { arguments: rawArgs } : {}),
-      _meta: {
-        ...(request.params._meta ?? {}),
-        __agentSlug: agentSlug,
-        __claimedPersona: claimedPersona,
-        __authStrength: authStrength,
-      },
+      _meta: buildProvenanceMeta(request.params._meta, { claimedPersona, authStrength: sessionAuthStrength.get(sessionId) ?? 'unverified' }, agentSlug),
+    }
+    // R1: inject the step-up nonce AFTER provenance assembly (buildProvenance
+    // Meta would not carry it). The subprocess echoes it back on its
+    // elicitation so the relay can bind prompt → session (fail-closed).
+    if (stepUpNonce !== null) {
+      ;(augmentedParams._meta as Record<string, unknown>)['__stepUpNonce'] = stepUpNonce
     }
 
     // T1-2 + S16-DB-03: log tool invocation (fire-and-forget, enriched)
     const start = Date.now()
     let success = true
     let errorClass: string | null = null
-    let errorText: string | null = null
     let responseBytes: number | null = null
 
     try {
@@ -402,47 +457,190 @@ app.post('/mcp', mcpRateLimiter, resolveAgentFromBearer, express.json({ limit: '
     } catch (err) {
       success = false
       errorClass = err instanceof Error ? err.constructor.name : 'UnknownError'
-      errorText = err instanceof Error ? err.message.slice(0, 2000) : String(err).slice(0, 2000)
       throw err
     } finally {
       const durationMs = Date.now() - start
-      // MCP JSON-RPC request id lives on the handler envelope, not params.
-      // The SDK types params without it; the handler receives the full message.
       const requestIdRaw: unknown = (request as unknown as { id?: string | number }).id
-      logToolInvocation(agentSlug, request.params.name, 'streamable_http', durationMs, success, errorClass, {
-        sessionId: null, // stateless transport: correlation via request_id
-        requestId: requestIdRaw !== undefined ? String(requestIdRaw) : null,
-        arguments: rawArgs,
-        responseBytes,
-      }, { claimedPersona, authStrength })
-      void errorText // error detail lives in error_message via errorClass when insert enriches; kept for stderr parity
+      logToolInvocation(
+        agentSlug,
+        request.params.name,
+        'streamable_http',
+        durationMs,
+        success,
+        errorClass,
+        {
+          sessionId,
+          requestId: requestIdRaw !== undefined ? String(requestIdRaw) : null,
+          arguments: rawArgs,
+          responseBytes,
+        },
+        { claimedPersona, authStrength: sessionAuthStrength.get(sessionId) ?? 'unverified' },
+      )
     }
   })
 
-  // Stateless mode: sessionIdGenerator: undefined — no session tracking or validation.
-  // The gateway is a proxy; the upstream MCP subprocess maintains its own state.
-  // Each HTTP request is handled independently. This matches the SDK's stateless pattern.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const transport = new (StreamableHTTPServerTransport as any)({ sessionIdGenerator: undefined })
-
-  res.on('close', () => {
-    void (transport as { close(): Promise<void> }).close()
+  const transport = new (StreamableHTTPServerTransport as any)({
+    sessionIdGenerator: () => sessionId,
+    onsessioninitialized: (sid: string) => {
+      void sid // registry session already created before connect
+    },
   })
+  transport.onclose = () => {
+    sessions.end(sessionId)
+  }
 
   // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
   await server.connect(transport)
-  // Pass req.body as the pre-parsed JSON object — SDK expects a parsed object, not a Buffer.
+  sessions.attachPair(sessionId, { server, transport })
+}
+
+// Auth strength for a stored session's callTool handler: captured at session
+// creation (POST initialize) and refreshed on every authenticated POST for
+// that session. Dev-flag sessions keep 'dev' stamped; bearer sessions update
+// if the credential changes (rotation mid-session).
+const sessionAuthStrength = new Map<string, IdentityAudit['authStrength']>()
+
+// ---------------------------------------------------------------------------
+// S19-ARCH-01c-R1 (FIND-1 fix): the step-up relay lives on the UPSTREAM
+// client — elicitation/create flows SUBPROCESS → gateway client (the gateway
+// is the subprocess's client). One handler serves ALL sessions: consume the
+// nonce, route the prompt to the OWNING session's stored transport, stamp
+// the operator label on accept. FAIL-CLOSED: unknown/expired/replayed nonce
+// or dead session → decline (the subprocess treats that as a human "no").
+// The gateway NEVER answers on the client's behalf; it only relays.
+// ---------------------------------------------------------------------------
+gateway.setElicitationRelay(async (request) => {
+  // Route by NONCE ONLY. The subprocess's runStepUp echoes just __stepUpNonce
+  // (it does not know the gateway's slug sideband) — and that is sufficient:
+  // the nonce is 128-bit random, single-use (burn-on-any-attempt), 10-min
+  // TTL, and the binding created at mint time DERIVES the owning {session,
+  // agent}. The presenting agent is derived, not asserted — no spoofable
+  // field in the loop.
+  const nonce = (request.params?._meta as Record<string, unknown> | undefined)?.['__stepUpNonce']
+  const bound = typeof nonce === 'string' ? sessions.consumeNonceByNonceOnly(nonce) : null
+  if (!bound) return { action: 'decline' as const }
+
+  const pair = sessions.getPair(bound.sessionId)
+  if (!pair) return { action: 'decline' as const }
+
+  try {
+    // Forward via the SERVER's request() (Protocol API). Correlation lives on
+    // the server, not the transport — and Protocol exposes request(), while
+    // sendRequest() exists only on handler `extra`. relatedRequestId stays
+    // unset: the elicitation is not tied to an inbound request on THIS
+    // session, so the transport writes it to the standalone GET stream.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const result = await (pair.server as any).request(request, ElicitResultSchema, { timeout: 120_000 })
+    if (result.action === 'accept') {
+      // Stamp the operator label: the subprocess records it on the history
+      // row (step_up_user). A LABEL for audit readability, not a control.
+      result._meta = { ...(result._meta ?? {}), __stepUpUser: OPERATOR_LABEL }
+    }
+    return result
+  } catch {
+    // No GET stream / client went away / timeout → no human answered → decline.
+    return { action: 'decline' as const }
+  }
+})
+
+app.post('/mcp', mcpRateLimiter, resolveAgentFromBearer, express.json({ limit: '4mb' }), async (req: Request, res: Response) => {
+  await gateway.waitUntilReady()
+
+  // ARCH-021: agentSlug was resolved from the Bearer token by resolveAgentFromBearer.
+  const agentSlug = res.locals['agentSlug'] as string
+  // S19-ARCH-01a: auth path stamped by the same middleware — always present.
+  const authStrength = (res.locals['authStrength'] as IdentityAudit['authStrength']) ?? 'unverified'
+
+  // ---------------------------------------------------------------------------
+  // S19-ARCH-01c: STATEFUL SESSIONS (ARCH-028 Decision 1).
+  //   initialize → register session (+create pair), return Mcp-Session-Id.
+  //   everything else → session header REQUIRED and must belong to the
+  //   bearer-resolved agent (session-fixation guard).
+  // ---------------------------------------------------------------------------
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const bodyMethod = (req.body as any)?.method as string | undefined
+  const isInitialize = bodyMethod === 'initialize'
+  const presentedSessionId = req.headers['mcp-session-id']
+  const presentedSession = typeof presentedSessionId === 'string' ? presentedSessionId : undefined
+
+  if (isInitialize && presentedSession === undefined) {
+    const session = sessions.register(agentSlug)
+    sessionAuthStrength.set(session.sessionId, authStrength)
+    await createSessionPair(session.sessionId, agentSlug)
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
+    await (sessions.getPair(session.sessionId)!.transport as any).handleRequest(req, res, req.body)
+    return
+  }
+
+  if (presentedSession === undefined) {
+    res.status(400).json({ error: 'Missing Mcp-Session-Id header. Initialize first.' })
+    return
+  }
+  const session = sessions.assertSessionAccess(presentedSession, agentSlug)
+  if (!session) {
+    res.status(404).json({ error: 'Session not found. Re-initialize.' })
+    return
+  }
+  sessionAuthStrength.set(session.sessionId, authStrength)
+  const pair = sessions.getPair(session.sessionId)
+  if (!pair) {
+    res.status(404).json({ error: 'Session not found. Re-initialize.' })
+    return
+  }
   // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
-  await (transport as any).handleRequest(req, res, req.body)
+  await (pair.transport as any).handleRequest(req, res, req.body)
 })
 
 // ---------------------------------------------------------------------------
-// GET /mcp — reject SSE fallback probe from VS Code MCP client.
-// VS Code falls back to GET /mcp as SSE when POST /mcp returns non-2xx.
-// Return 405 so VS Code gets a clean "not supported" rather than 404 HTML.
+// GET /mcp — S19-ARCH-01c: open the session's SSE stream (server→client
+// requests, i.e. elicitation delivery to VS Code). Requires a valid session
+// bound to the bearer identity. Routes through the STORED per-session pair
+// (FIND-2 fix — a fresh transport here would reject the stream request).
+// Session-less GETs keep the legacy 405 (VS Code fallback probe).
 // ---------------------------------------------------------------------------
-app.get('/mcp', (_req: Request, res: Response) => {
-  res.status(405).json({ error: 'SSE transport not supported on /mcp. Use POST /mcp (StreamableHTTP).' })
+app.get('/mcp', mcpRateLimiter, resolveAgentFromBearer, async (req: Request, res: Response) => {
+  await gateway.waitUntilReady()
+
+  const agentSlug = res.locals['agentSlug'] as string
+  const presentedSessionId = req.headers['mcp-session-id']
+  const sessionId = typeof presentedSessionId === 'string' ? presentedSessionId : undefined
+  if (sessionId === undefined) {
+    res.status(405).json({ error: 'SSE transport not supported without a session. Use POST /mcp (StreamableHTTP).' })
+    return
+  }
+  const session = sessions.assertSessionAccess(sessionId, agentSlug)
+  if (!session) {
+    res.status(404).json({ error: 'Session not found. Re-initialize.' })
+    return
+  }
+  const pair = sessions.getPair(session.sessionId)
+  if (!pair) {
+    res.status(404).json({ error: 'Session not found. Re-initialize.' })
+    return
+  }
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
+  await (pair.transport as any).handleRequest(req, res, req.body)
+})
+
+// ---------------------------------------------------------------------------
+// DELETE /mcp — S19-ARCH-01c: client-initiated session termination.
+// ---------------------------------------------------------------------------
+app.delete('/mcp', mcpRateLimiter, resolveAgentFromBearer, async (req: Request, res: Response) => {
+  const agentSlug = res.locals['agentSlug'] as string
+  const presentedSessionId = req.headers['mcp-session-id']
+  const sessionId = typeof presentedSessionId === 'string' ? presentedSessionId : undefined
+  if (sessionId === undefined) {
+    res.status(400).json({ error: 'Missing Mcp-Session-Id header.' })
+    return
+  }
+  const session = sessions.assertSessionAccess(sessionId, agentSlug)
+  if (!session) {
+    res.status(404).json({ error: 'Session not found.' })
+    return
+  }
+  sessions.end(sessionId)
+  res.status(200).json({ status: 'session ended' })
 })
 
 // ---------------------------------------------------------------------------
@@ -461,46 +659,142 @@ app.get('/sse', sseRateLimiter, validateTokenQuery, async (req: Request, res: Re
 
   const client = gateway.getClient()
 
+  // ---------------------------------------------------------------------------
+  // S19-ARCH-01e (#2778): OPTIONAL per-connection identity on the legacy /sse
+  // handshake. ARCH-016 compatibility rule: the contract (GET /sse?token= +
+  // POST /message?sessionId=, shared MCP_GATEWAY_TOKEN) is unchanged — agent
+  // and persona query params are OPTIONAL and absent params behave exactly as
+  // before (anonymous 'bridge' actor).
+  //
+  //   agent=<slug>    — resolved against the live agents table at handshake.
+  //                     Unresolvable → connection proceeds ANONYMOUS (bridge
+  //                     actor), never rejected: the shared token is the only
+  //                     credential, so identity here grants no privilege —
+  //                     it enriches the audit trail and the subprocess's
+  //                     per-call context. Fail-open to label, fail-closed
+  //                     to privilege.
+  //   persona=<label> — claimed persona label (same spoofable-by-design
+  //                     carve-out as the /mcp persona argument, ARCH-026).
+  //
+  // The binding lives for the life of the SSE connection and feeds BOTH the
+  // tool_invocations identity columns AND the subprocess _meta injection —
+  // closing the 'identity does not flow on /sse' gap end to end.
+  // ---------------------------------------------------------------------------
+  const rawAgent = req.query['agent']
+  const rawPersona = req.query['persona']
+  let sseAgent: string | null = null
+  if (typeof rawAgent === 'string' && /^[a-z][a-z0-9_-]{0,63}$/.test(rawAgent)) {
+    try {
+      const { rows } = await pool.query<{ slug: string }>(
+        'SELECT slug FROM agents WHERE slug = $1 AND active = true LIMIT 1',
+        [rawAgent],
+      )
+      if (rows.length > 0) sseAgent = rows[0]!.slug
+    } catch {
+      // DB hiccup → anonymous; never block the connection on identity.
+    }
+  }
+  let ssePersona: string | null = null
+  if (typeof rawPersona === 'string' && /^[a-z][a-z0-9_-]{0,63}$/.test(rawPersona)) {
+    ssePersona = rawPersona
+  }
+  if (rawAgent !== undefined && sseAgent === null) {
+    console.warn(`[mcp-gateway] /sse handshake: agent='${String(rawAgent).slice(0, 40)}' not resolved — proceeding as anonymous bridge actor`)
+  }
+
   // One Server instance per Bridge connection — proxies all tool calls upstream.
   const server = new Server(
     { name: 'mcp-gateway', version: '1.0.0' },
     { capabilities: { tools: {} } },
   )
 
-  server.setRequestHandler(ListToolsRequestSchema, async () => {
-    return client.listTools()
+  server.setRequestHandler(ListToolsRequestSchema, async (request) => {
+    // S19-ARCH-01b/01e: SSE discovery is audited too — shared_token strength,
+    // bound handshake agent when provided (anonymous 'bridge' otherwise).
+    // Same enrichment as the /mcp tools/list row.
+    const start = Date.now()
+    let success = true
+    let errorClass: string | null = null
+    let responseBytes: number | null = null
+    try {
+      const result = await client.listTools()
+      responseBytes = JSON.stringify(result ?? {}).length
+      return result
+    } catch (err) {
+      success = false
+      errorClass = err instanceof Error ? err.constructor.name : 'UnknownError'
+      throw err
+    } finally {
+      const requestIdRaw: unknown = (request as unknown as { id?: string | number }).id
+      logToolInvocation(
+        sseAgent ?? 'bridge',
+        'tools/list',
+        'sse',
+        Date.now() - start,
+        success,
+        errorClass,
+        {
+          sessionId: null,
+          requestId: requestIdRaw !== undefined ? String(requestIdRaw) : null,
+          arguments: null,
+          responseBytes,
+        },
+        { claimedPersona: ssePersona, authStrength: 'shared_token' },
+      )
+    }
   })
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
-    // T1-3: log tool invocation to tool_invocations table (fire-and-forget)
-    // DATA QUALITY GAP: agent_slug defaulted to 'bridge'; session registry
-    // enhancement (linking SSE sessions to calling agent identity) deferred
-    // per Silas ARCH-024 ruling 2026-06-14. Future work: resolve real agent
-    // slug from session state instead of hardcoded fallback.
-    const agentSlugForLogging = 'bridge'
+    // S19-ARCH-01e: identity now FLOWS on /sse. The handshake binding
+    // (optional agent + persona) feeds both the audit row and the subprocess
+    // _meta — the subprocess can resolve identity per-call on the Bridge path
+    // exactly like /mcp (same sideband keys, same provenance model: the
+    // gateway is the source, client input cannot forge it).
+    const agentSlugForLogging = sseAgent ?? 'bridge'
     const start = Date.now()
     let success = true
     let errorClass: string | null = null
 
+    // Inject identity into _meta (protocol sideband — same mechanism as /mcp).
+    // Anonymous bridges keep the historical behavior: no _meta, subprocess
+    // tools that require identity reject as before (fail-closed).
+    const augmentedParams = sseAgent
+      ? {
+          ...request.params,
+          _meta: {
+            ...(request.params._meta ?? {}),
+            __agentSlug: sseAgent,
+            __claimedPersona: ssePersona,
+            __authStrength: 'shared_token' as const,
+          },
+        }
+      : request.params
+
     try {
-      return await client.callTool(request.params)
+      return await client.callTool(augmentedParams)
     } catch (err) {
       success = false
       errorClass = err instanceof Error ? err.constructor.name : 'UnknownError'
       throw err
     } finally {
       const durationMs = Date.now() - start
-      // S19-ARCH-01a: the shared /sse Bridge token is a single credential for
-      // every integration — weaker than per-agent bearer, stamped as such so
-      // the audit trail distinguishes Bridge calls from agent calls.
+      // S19-ARCH-01a/01e: the shared /sse token is a single credential for
+      // every integration — weaker than per-agent bearer, stamped as such.
       logToolInvocation(agentSlugForLogging, request.params.name, 'sse', durationMs, success, errorClass, undefined, {
-        claimedPersona: null,
+        claimedPersona: ssePersona,
         authStrength: 'shared_token',
       })
     }
   })
 
-  const transport = new SSEServerTransport('/message', res)
+  // S19-ARCH-01e: carry the shared token on the announced /message endpoint —
+  // the SDK appends sessionId to this path, so SDK-based clients (which cannot
+  // add query params to the POST themselves) authenticate /message without
+  // any client change. The token is already known to the client (it just
+  // passed ?token= on the handshake); this does not widen the surface.
+  // SEC-D3: the token stays out of gateway logs (validateTokenQuery deletes
+  // it from req.query before any logging path).
+  const transport = new SSEServerTransport(`/message?token=${rawToken}`, res)
   const sessionId = transport.sessionId
 
   transports.set(sessionId, transport)
@@ -532,7 +826,14 @@ app.post('/message', messageRateLimiter, validateTokenQuery, express.raw({ type:
     return
   }
 
-  await transport.handlePostMessage(req, res)
+  // S19-ARCH-01e fix (pre-existing Sprint 6 bug surfaced by the 01e test):
+  // express.raw() already consumed the request stream, so handlePostMessage's
+  // internal getRawBody(req) hit 'stream is not readable' on every POST —
+  // the legacy /sse path could never complete a real JSON-RPC call (consistent
+  // with zero sse rows ever recorded in tool_invocations). Pass the body
+  // through as PARSED JSON (parsedBody) — a raw Buffer would fail the
+  // message schema on the other side.
+  await transport.handlePostMessage(req, res, JSON.parse(req.body))
 })
 
 // ---------------------------------------------------------------------------

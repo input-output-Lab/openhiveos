@@ -17,7 +17,7 @@ export const storeThoughtSchema = z.object({
   confidence: z.number().min(0).max(1).optional(),
   raw_behavior: z.string().optional(),
   expressed_behavior: z.string().optional(),
-  disposition_snapshot: z.record(z.unknown()).optional(),
+  disposition_snapshot: z.record(z.string(), z.unknown()).optional(),
   counter_thought: z
     .object({
       primary_thought_summary: z.string(),
@@ -27,7 +27,7 @@ export const storeThoughtSchema = z.object({
       intensity: z.enum(['signal', 'caution', 'block']),
     })
     .optional(),
-  metadata: z.record(z.unknown()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
 })
 
 export type StoreThoughtInput = z.infer<typeof storeThoughtSchema>

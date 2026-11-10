@@ -230,6 +230,8 @@ export interface IdentityAuditContext {
   claimedPersona: string | null
   /** Auth path that produced the attribution ('bearer' | 'dev' | 'unverified' in GATEWAY_MODE). */
   authStrength: string
+  /** Operator label when this transition passed human step-up (ARCH-028). */
+  stepUpUser?: string
 }
 
 const KNOWN_AUTH_STRENGTHS = new Set([

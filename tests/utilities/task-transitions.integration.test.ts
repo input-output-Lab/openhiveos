@@ -101,20 +101,27 @@ d('S17-BE-01 integration: full transition lifecycle (real DB)', () => {
     // where nova approves. This project is elizabeth-owned → approver = nova.
     // NOTE: approver is status-ONLY (smuggling gate — notes are reviewer-only
     // per the Locksmith BLOCK fix).
+    // S19-ARCH-01c (#2776): approver transitions are GATED — the fail-closed
+    // step-up callback must approve before the matrix write proceeds.
     const r = await handleUpdateTask(
       { task_id: taskId, status: 'done' },
       'nova',
+      undefined,
+      async () => ({ approved: true, stepUpUser: 'review-fixture', reason: 'approved in test' }),
     )
     expect(r).not.toHaveProperty('error')
     expect((r as { status: string }).status).toBe('done')
 
-    const hist = await pool.query<{ to_status: string; changed_by: string | null }>(
-      `SELECT to_status, changed_by FROM task_status_history
+    const hist = await pool.query<{ to_status: string; changed_by: string | null; auth_strength: string | null; step_up_user: string | null }>(
+      `SELECT to_status, changed_by, auth_strength, step_up_user FROM task_status_history
        WHERE task_id = $1 ORDER BY changed_at DESC LIMIT 1`,
       [taskId],
     )
     expect(hist.rows[0]!.to_status).toBe('done')
     expect(hist.rows[0]!.changed_by).toBe('nova')
+    // Step-up audit triple present on the gated transition (ARCH-028).
+    expect(hist.rows[0]!.auth_strength).toBe('session')
+    expect(hist.rows[0]!.step_up_user).toBe('review-fixture')
   })
 
   it('P4: done is terminal — no further transitions permitted', async () => {
@@ -226,12 +233,16 @@ d('S17-BE-01 integration: rejection paths + atomic guard (real DB)', () => {
     await handleUpdateTask({ task_id: t3, status: 'wip' }, ASSIGNEE)
     await handleUpdateTask({ task_id: t3, status: 'review' }, ASSIGNEE)
     await handleUpdateTask({ task_id: t3, status: 'pending-close' }, REVIEWER)
-    // nova (approver) tries to approve AND overwrite metadata in one call
+    // nova (approver) tries to approve AND overwrite metadata in one call.
+    // S19-ARCH-01c: approver transitions are gated — with no step-up callback
+    // the fail-closed gate denies BEFORE any field evaluation. Either denial
+    // preserves the security property: no transition, no smuggled metadata.
     const r = await handleUpdateTask(
       { task_id: t3, status: 'done', metadata: { domain: 'qa', hijacked: true } },
       'nova',
     )
-    expect(r).toHaveProperty('error', 'invalid_transition')
+    expect(r).toHaveProperty('error')
+    expect(['step_up_required', 'invalid_transition']).toContain((r as { error: string }).error)
     const row = await pool.query<{ status: string; metadata: Record<string, unknown> }>(
       `SELECT status, metadata FROM tasks WHERE id = $1`, [t3],
     )

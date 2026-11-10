@@ -72,6 +72,8 @@ const MIGRATIONS = [
   // S19-ARCH-01a (#2774): claimed_persona + auth_strength audit columns on
   // tool_invocations + task_status_history (incl. the 031 trigger body).
   '031_identity_audit_columns.sql',
+  // S19-ARCH-01c (#2776): step_up_user on task_status_history (032 trigger body).
+  '032_step_up_user.sql',
 ]
 
 /**

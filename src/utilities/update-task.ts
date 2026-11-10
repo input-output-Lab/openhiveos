@@ -5,6 +5,30 @@ import { withActor } from '../db/client.js'
 import { isValidAgentSlug } from '../squad/manifest.js'
 import { assertTransition } from './task-transitions.js'
 import type { IdentityAuditContext } from '../auth/identity.js'
+import { resolveStepUpRoles, runStepUp, type StepUpOutcome } from '../auth/step-up.js'
+
+// ---------------------------------------------------------------------------
+// S19-ARCH-01c (#2776): step-up gate types + role set.
+// ---------------------------------------------------------------------------
+
+export interface StepUpContext {
+  taskId: number
+  taskTitle: string
+  fromStatus: string
+  toStatus: string
+  callerAgentSlug: string
+  /** Nonce the gateway injected into this call's _meta (session binding). */
+  stepUpNonce: string | null
+}
+
+// ARCH-028 Decision 3: gated roles default to approver only (pending-close →
+// done). Widening is config (HIVE_STEPUP_ROLES), not code. Parsed once per
+// process; the env var is deployment-level, not per-call.
+const STEP_UP_ROLES: ReadonlySet<string> = resolveStepUpRoles(process.env['HIVE_STEPUP_ROLES'])
+
+// Re-exported for the tool-registration layer.
+export { runStepUp }
+export type { StepUpOutcome }
 
 export const updateTaskSchema = z.object({
   task_id: z.number().int().positive(),
@@ -38,7 +62,7 @@ export const updateTaskSchema = z.object({
     .optional(),
   // SEC-ACCEPTED-F3 (Locksmith, 2026-05-20): github_pr_url accepts any valid URL
   // with no domain restriction. Same risk acceptance as create-task.ts.
-  github_pr_url: z.string().url().optional(),
+  github_pr_url: z.url().optional(),
   notes: z.string().max(5000).optional(),
   // S16-DB-02 (#2542): estimate revision is owner-only (like metadata).
   // Numeric envelope sanity checked in superRefine below.
@@ -49,7 +73,7 @@ export const updateTaskSchema = z.object({
   // Operator-defined classification metadata. Owner-only field — assignees may
   // not overwrite metadata (only status transitions are permitted on the assignee
   // path). Domain-agnostic JSONB; replaces the full metadata object on update.
-  metadata: z.record(z.unknown()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
 })
 
 export type UpdateTaskInput = z.infer<typeof updateTaskSchema>
@@ -70,8 +94,21 @@ export async function handleUpdateTask(
   agentSlug: string,
   // S19-ARCH-01a: claimed persona + auth strength for the transition history
   // row (migration 031). Optional — cron/system and legacy callers omit it.
-  identity?: IdentityAuditContext,
+  identityArg?: IdentityAuditContext,
+  // S19-ARCH-01c (#2776, ARCH-028): the human step-up callback. Invoked when
+  // the transition matrix resolves a gated role. FAIL-CLOSED: when a gated
+  // role resolves and NO callback was supplied, the transition is rejected —
+  // wiring the callback is the only way a gated transition can proceed.
+  // The MCP tool layer wires runStepUp; cron/system paths never supply it and
+  // never resolve gated roles (their transitions are non-gated rows).
+  requireStepUp?: (ctx: StepUpContext) => Promise<StepUpOutcome>,
+  // Nonce the gateway injected into this call's _meta (round-trips through
+  // the elicitation so the gateway can bind the prompt to this session).
+  stepUpNonce: string | null = null,
 ) {
+  // Mutable within the call: a successful step-up ENRICHES the identity for
+  // the history row (auth_strength → 'session', stepUpUser stamped).
+  let identity: IdentityAuditContext | undefined = identityArg
   const parsed = updateTaskSchema.parse(input)
 
   // ARCH-024: `triage` is NOT in the status enum (see schema above), so it is
@@ -151,6 +188,41 @@ export async function handleUpdateTask(
       return {
         error: 'invalid_transition',
         message: v.reason,
+      }
+    }
+
+    // S19-ARCH-01c (#2776, ARCH-028): HUMAN STEP-UP GATE — runs AFTER the
+    // matrix resolved the caller's role and BEFORE any write. Gated roles
+    // (default: approver) require a human approval via elicitation. With no
+    // callback wired the gate is FAIL-CLOSED: gated role + no step-up path
+    // = rejected transition, nothing written.
+    if (v.role !== 'owner' && v.role !== 'assignee' && v.role !== 'system' && STEP_UP_ROLES.has(v.role)) {
+      if (!requireStepUp) {
+        return {
+          error: 'step_up_required',
+          message: `The ${v.role} transition requires human step-up confirmation, and no step-up channel is available on this path. The transition was NOT performed.`,
+        }
+      }
+      const outcome = await requireStepUp({
+        taskId: parsed.task_id,
+        taskTitle: current.title,
+        fromStatus: current.status,
+        toStatus: parsed.status,
+        callerAgentSlug: agentSlug,
+        stepUpNonce,
+      })
+      if (!outcome.approved) {
+        return {
+          error: 'step_up_denied',
+          message: `Human step-up did not approve this transition (${outcome.reason}). The transition was NOT performed.`,
+        }
+      }
+      // Approval enriches the audit context: the history row records the
+      // operator label + auth_strength='session' (value reserved by 031).
+      identity = {
+        claimedPersona: identity?.claimedPersona ?? null,
+        authStrength: 'session',
+        stepUpUser: outcome.stepUpUser,
       }
     }
 

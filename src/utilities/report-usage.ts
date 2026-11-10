@@ -38,7 +38,7 @@ export const reportUsageSchema = z
     task_id: z.number().int().positive().optional(),
     project_id: z.number().int().positive().optional(),
     client_surface: z.enum(['vscode-copilot', 'claude-code', 'bridge', 'cli', 'cron', 'api']).optional(),
-    requested_at: z.string().datetime({ offset: true }).optional(),
+    requested_at: z.iso.datetime({ offset: true }).optional(),
     request_id: z.string().min(1).max(256).optional(),
     reasoning_tokens: z.number().int().min(0).optional(),
     prompt_token_details: z

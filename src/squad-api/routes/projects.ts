@@ -519,8 +519,8 @@ router.patch('/:slug', async (req, res) => {
     }
   } catch (err) {
     if (err instanceof z.ZodError) {
-      const fieldErrors = err.errors.map((e) => ({
-        field: e.path.join('.'),
+      const fieldErrors = err.issues.map((e: { path: (string | number | symbol)[]; message: string }) => ({
+        field: e.path.map(String).join('.'),
         message: e.message,
       }))
       res.status(400).json({ error: 'Validation failed', fields: fieldErrors })

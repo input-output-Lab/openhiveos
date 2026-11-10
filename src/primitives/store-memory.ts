@@ -5,7 +5,7 @@ import { embedContent } from '../embeddings/gemini.js'
 export const storeMemorySchema = z.object({
   content: z.string().min(1),
   task_id: z.number().int().positive().optional(),
-  metadata: z.record(z.unknown()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
 })
 
 export type StoreMemoryInput = z.infer<typeof storeMemorySchema>
