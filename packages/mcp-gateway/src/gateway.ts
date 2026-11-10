@@ -16,6 +16,7 @@ import { createHash, timingSafeEqual } from 'node:crypto'
 import { Pool } from 'pg'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
+import { ElicitRequestSchema } from '@modelcontextprotocol/sdk/types.js'
 
 // ---------------------------------------------------------------------------
 // Per-request agent identity resolution — ARCH-021
@@ -122,11 +123,34 @@ export class Gateway {
   private readyState = false
 
   constructor() {
-    this.client = new Client({ name: 'mcp-gateway', version: '1.0.0' })
+    // S19-ARCH-01c-R1 (FIND-1 fix): elicitation/create flows SUBPROCESS → THIS
+    // client (the gateway is the subprocess's client). Without declaring the
+    // elicitation capability the SDK's form-mode guard rejects every request
+    // before any handler runs — the capability declaration is not optional.
+    // The relay handler itself is injected via setElicitationRelay() (index.ts
+    // owns the session registry).
+    this.client = new Client(
+      { name: 'mcp-gateway', version: '1.0.0' },
+      { capabilities: { elicitation: { form: {} } } },
+    )
     this.readyPromise = new Promise<void>((resolve, reject) => {
       this.resolveReady = () => { this.readyState = true; resolve() }
       this.rejectReady = reject
     })
+  }
+
+  /**
+   * Register the step-up relay on the upstream client. Called once at boot
+   * from index.ts AFTER the session registry exists. The handler receives
+   * the raw elicitation request; its return value goes back to the
+   * subprocess (ElicitResult shape enforced by the SDK).
+   */
+  setElicitationRelay(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    handler: (request: any) => Promise<any>,
+  ): void {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    this.client.setRequestHandler(ElicitRequestSchema, handler as any)
   }
 
   async start(): Promise<void> {

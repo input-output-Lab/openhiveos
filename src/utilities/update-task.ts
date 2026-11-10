@@ -62,7 +62,7 @@ export const updateTaskSchema = z.object({
     .optional(),
   // SEC-ACCEPTED-F3 (Locksmith, 2026-05-20): github_pr_url accepts any valid URL
   // with no domain restriction. Same risk acceptance as create-task.ts.
-  github_pr_url: z.string().url().optional(),
+  github_pr_url: z.url().optional(),
   notes: z.string().max(5000).optional(),
   // S16-DB-02 (#2542): estimate revision is owner-only (like metadata).
   // Numeric envelope sanity checked in superRefine below.
@@ -73,7 +73,7 @@ export const updateTaskSchema = z.object({
   // Operator-defined classification metadata. Owner-only field — assignees may
   // not overwrite metadata (only status transitions are permitted on the assignee
   // path). Domain-agnostic JSONB; replaces the full metadata object on update.
-  metadata: z.record(z.unknown()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
 })
 
 export type UpdateTaskInput = z.infer<typeof updateTaskSchema>

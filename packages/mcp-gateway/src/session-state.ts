@@ -17,11 +17,24 @@
 
 import { randomBytes } from 'node:crypto'
 
+/** The downstream protocol pair for one client session (S19-ARCH-01c-R1, FIND-2 fix).
+ *  StreamableHTTP stateful mode requires the SAME transport instance across
+ *  every request of a session — a fresh instance rejects non-initialize
+ *  requests (SDK validateSession: !initialized → 400). */
+export interface SessionPair {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  server: any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  transport: any
+}
+
 export interface GatewaySession {
   sessionId: string
   agentSlug: string
   createdAt: number
   lastSeenAt: number
+  /** Attached after createSession(); present for the life of the session. */
+  pair?: SessionPair | undefined
 }
 
 const SESSION_IDLE_TTL_MS = 30 * 60_000 // 30 min idle → swept
@@ -56,6 +69,16 @@ export class SessionRegistry {
     return session
   }
 
+  /** Attach the protocol pair after building server+transport for the session. */
+  attachPair(sessionId: string, pair: SessionPair): void {
+    const s = this.sessions.get(sessionId)
+    if (s) s.pair = pair
+  }
+
+  getPair(sessionId: string): SessionPair | undefined {
+    return this.sessions.get(sessionId)?.pair
+  }
+
   get(sessionId: string): GatewaySession | undefined {
     return this.sessions.get(sessionId)
   }
@@ -82,6 +105,13 @@ export class SessionRegistry {
     // Invalidate any pending step-ups bound to the dead session.
     for (const [nonce, p] of this.pendingNonces) {
       if (p.sessionId === sessionId) this.pendingNonces.delete(nonce)
+    }
+    // Close the downstream transport so the client's GET stream terminates
+    // (onclose fires client-side; reconnect re-initializes).
+    const pair = this.sessions.get(sessionId)?.pair
+    if (pair) {
+      void pair.transport.close().catch(() => {})
+      this.sessions.get(sessionId)!.pair = undefined
     }
   }
 
@@ -116,6 +146,23 @@ export class SessionRegistry {
     return p
   }
 
+  /**
+   * Consume a nonce WITHOUT an agent assertion (S19-ARCH-01c-R1): used by
+   * the upstream relay, which receives elicitation from the subprocess —
+   * the only party that legitimately holds the nonce. The owning agent is
+   * DERIVED from the mint-time binding, not asserted by the presenter, so
+   * there is no spoofable field in the loop. Still single-use
+   * (burn-on-any-attempt) and expiry-checked; a dead owning session → null.
+   */
+  consumeNonceByNonceOnly(nonce: string): PendingStepUp | null {
+    const p = this.pendingNonces.get(nonce)
+    this.pendingNonces.delete(nonce) // single-use regardless of outcome
+    if (!p) return null
+    if (p.expiresAt <= Date.now()) return null
+    if (!this.getPair(p.sessionId)) return null
+    return p
+  }
+
   pendingCount(): number {
     return this.pendingNonces.size
   }
@@ -128,9 +175,11 @@ export class SessionRegistry {
     const now = Date.now()
     if (now - this.lastSweep < this.sweepIntervalMs) return
     this.lastSweep = now
+    const stale: string[] = []
     for (const [id, s] of this.sessions) {
-      if (now - s.lastSeenAt > SESSION_IDLE_TTL_MS) this.end(id)
+      if (now - s.lastSeenAt > SESSION_IDLE_TTL_MS) stale.push(id)
     }
+    for (const id of stale) this.end(id)
     for (const [nonce, p] of this.pendingNonces) {
       if (p.expiresAt <= now) this.pendingNonces.delete(nonce)
     }

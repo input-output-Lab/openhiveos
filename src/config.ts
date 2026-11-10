@@ -32,7 +32,7 @@ const ConfigSchema = z.object({
   HEALTH_PORT: z.coerce.number().int().positive().default(3000),
   // Squad API integration — ARCH-015 (report_usage utility)
   // URL to the squad-api (e.g., http://localhost:3005)
-  SQUAD_API_URL: z.string().url().default('http://localhost:3005'),
+  SQUAD_API_URL: z.url().default('http://localhost:3005'),
   // Ingestion token for POST /internal/usage — ARCH-015 SEC-C1.
   // Must match OPENHIVEOS_INGESTION_TOKEN in squad-api/.env
   // Generated: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
@@ -47,7 +47,7 @@ const ConfigSchema = z.object({
   ONE_SEAL_PATH: z.string().min(1).default('./one.seal.json'),
   // Slack alerting — S18-OPS-01 (#2569). Optional: without it, cron alerts
   // no-op (delivered=false, reason='no_webhook') and the audit still runs.
-  ALERT_SLACK_WEBHOOK_URL: z.string().url().optional(),
+  ALERT_SLACK_WEBHOOK_URL: z.url().optional(),
 })
 
 export type Config = z.infer<typeof ConfigSchema>

@@ -89,8 +89,31 @@ Revisit on a second operator or non-loopback exposure.
 3. **Every step-up-approved transition row carries** `auth_strength='session'` and a non-null `step_up_user`.
 4. **Session headers are never trusted without the bearer**: session fixation is rejected at the POST boundary.
 
+## STRIDE Addendum — Stateful Gateway Sessions (S19-ARCH-01c-R1)
+
+Added per Locksmith Tier-3 review FIND-4 (SEC-18): the move from stateless to
+stateful sessions is a new attack surface and requires explicit threat
+documentation. The S17 STRIDE model covers the gateway's auth surface; this
+addendum covers the session layer only.
+
+| Threat | Vector | Mitigation (implemented) | Residual risk |
+|---|---|---|---|
+| **S — Session table exhaustion** | Unauthenticated spam of `initialize` fills the in-memory registry → memory exhaustion / DoS | Sessions are created only after `resolveAgentFromBearer` succeeds (valid per-agent bearer required); idle TTL sweep (30 min) bounds lifetime; `DELETE /mcp` evicts; rate limiter (120 req/min/IP) caps creation rate | Bearer-holder can create sessions up to rate-limit × TTL ≈ 3,600 live sessions — bounded, monitored via registry count; a flood from a *valid* credential is an authorized-actor problem, not a remote DoS |
+| **T — Step-up replay** | Captured elicitation answer replayed to approve twice | Nonces are single-use on ANY attempt (burn-on-consume); 10-min absolute TTL; wrong-agent attempt burns the nonce (no probing) | None: a replayed nonce is always unknown → decline |
+| **R — Repudiation of approval** | "I never clicked approve" dispute on a `done` transition | History row records the attribution triple (changed_by=agent, auth_strength='session', step_up_user=operator label); gateway logs relay outcomes to stderr | `step_up_user` is a LABEL not an identity proof (documented trade-off 4); single-operator loopback premise makes this acceptable — second operator triggers the OAuth revisit |
+| **I — Elicitation content injection** | Malicious tool handler crafts elicitation message to phish the human | The prompt text is subprocess-controlled either way (same trust boundary as tool results); the gateway does not interpret or rewrite content, only routes by nonce and stamps the label on the *result* | Same trust level as tool output itself — the human sees the calling agent's slug in the prompt; content-level phishing is out of scope for the transport layer |
+| **D — Confused-deputy relay** | Gateway auto-answers elicitation on a client's behalf, or routes one session's prompt to another | Gateway NEVER answers: no-human-answerable path returns `decline`; routing is nonce→owning-session only; a session-less or dead-session target declines | None by construction (fail-closed); the relay has no answer path |
+| **E — Session fixation / hijack** | Attacker steals `Mcp-Session-Id`, uses it without the token | Every POST/GET/DELETE validates session **and** bearer-resolved agent match; mismatch → opaque 404 | Token theft remains the pre-existing risk class (SEC-D1 model); session binding adds no new capability to a token thief |
+| **E — Privilege escalation via stored pair** | Direct access to another session's Server/transport from a request context | Pairs are addressed ONLY via `sessions.assertSessionAccess(id, bearerSlug)`; no route accepts a pair reference from client input | None: single lookup path, registry is module-private |
+
+**Threat model update status:** this addendum satisfies the post-v0.1 SEC-18
+rule for the stateful-session change. The main S17 STRIDE document should
+reference this section at its next scheduled review (Scout owns the schedule).
+
 ## Gates to Leave Draft
 
 1. Locksmith Tier-3 review of this record + the implementation PR.
 2. Elizabeth sprint-alignment sign-off.
 3. Status flips `draft → Decided`, `docs/README.md` ADR table updated.
+
+

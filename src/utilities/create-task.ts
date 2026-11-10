@@ -33,19 +33,19 @@ export const createTaskSchema = z.object({
   // Mitigations: field is named github_pr_url (intent is clear), all callers are
   // authenticated agents, field is not rendered in any public-facing surface.
   // If this field is ever surfaced in a UI, add domain allowlist validation.
-  github_pr_url: z.string().url().optional(),
+  github_pr_url: z.url().optional(),
   notes: z.string().max(5000).optional(),
   // Operator-defined classification metadata. Domain-agnostic JSONB — keys and
   // values are set by the operator or agent. See docs/capabilities-reference.md
   // for recommended (non-enforced) key conventions.
-  metadata: z.record(z.unknown()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
 })
 
 // Arty rule enforcement: validate envelope AFTER object construction
 createTaskSchema.superRefine((val, ctx) => {
   if (!estimateEnvelopeCheck(val)) {
     ctx.addIssue({
-      code: z.ZodIssueCode.custom,
+      code: 'custom',
       message: 'Invalid estimate envelope: billing_low must be <= estimated_hours <= billing_high',
       path: ['billing_high'],
     })

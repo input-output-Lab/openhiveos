@@ -10,7 +10,7 @@ export const queryTasksSchema = z.object({
   // JSONB containment filter — each key/value pair must be present in the task's
   // metadata. Uses Postgres @> operator. Array values must be passed as arrays.
   // Example: { "tags": ["backend"] } matches tasks where metadata contains that tag.
-  metadata_filter: z.record(z.unknown()).optional(),
+  metadata_filter: z.record(z.string(), z.unknown()).optional(),
 })
 
 export type QueryTasksInput = z.infer<typeof queryTasksSchema>
