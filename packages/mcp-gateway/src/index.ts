@@ -437,6 +437,12 @@ async function createSessionPair(sessionId: string, agentSlug: string): Promise<
       ...(rawArgs !== null ? { arguments: rawArgs } : {}),
       _meta: buildProvenanceMeta(request.params._meta, { claimedPersona, authStrength: sessionAuthStrength.get(sessionId) ?? 'unverified' }, agentSlug),
     }
+    // R1: inject the step-up nonce AFTER provenance assembly (buildProvenance
+    // Meta would not carry it). The subprocess echoes it back on its
+    // elicitation so the relay can bind prompt → session (fail-closed).
+    if (stepUpNonce !== null) {
+      ;(augmentedParams._meta as Record<string, unknown>)['__stepUpNonce'] = stepUpNonce
+    }
 
     // T1-2 + S16-DB-03: log tool invocation (fire-and-forget, enriched)
     const start = Date.now()
