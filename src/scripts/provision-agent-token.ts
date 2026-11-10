@@ -92,6 +92,20 @@ if (args.includes('--help') || args.includes('-h')) {
   process.exit(0)
 }
 
+// Unknown-flag guard — Locksmith incident 2026-11-10 (task 2779 validation):
+// `--keychain-nonsense` silently rotated an agent and PRINTED the raw token
+// to stdout because unknown flags were ignored and the script fell through
+// to the print path. A mistyped flag must never mint-and-expose a secret.
+const KNOWN_FLAGS = new Set(['--revoke', '--token-only', '--keychain', '--help', '-h'])
+const unknownFlags = args.filter((a) => a.startsWith('-') && a !== '-' && !KNOWN_FLAGS.has(a))
+if (unknownFlags.length > 0) {
+  console.error(`[provision] Error: unknown flag(s): ${unknownFlags.join(', ')}`)
+  console.error('[provision] Refusing to provision — a mistyped flag could otherwise')
+  console.error('[provision] silently rotate a token and print it to stdout.')
+  console.error('[provision] Run with --help to see valid flags.')
+  process.exit(1)
+}
+
 const isRevoke = args.includes('--revoke')
 const isTokenOnly = args.includes('--token-only')
 const isKeychain = args.includes('--keychain')
