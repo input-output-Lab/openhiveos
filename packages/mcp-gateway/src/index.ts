@@ -204,6 +204,13 @@ function extractSurface(params: { _meta?: Record<string, unknown> }): string {
  * single join at write time so budget/analytics rollups skip it at read time.
  * Failures in this function must NOT crash or corrupt the upstream
  * tool call response. Errors are logged to stderr for operator inspection.
+ *
+ * S19-ARCH-01b: also records protocol-level calls (tools/list) — the
+ * discovery surface previously left no audit trace. These rows carry
+ * tool_name='tools/list' so every row stays attributable to the auth path
+ * that produced it; they have no task attribution (task_id/project_id NULL),
+ * and /mcp rows have session_id NULL so the worklog derivation view
+ * (v_session_active_time filters session_id IS NOT NULL) is unaffected.
  */
 function logToolInvocation(
   agentSlug: string,
@@ -399,8 +406,42 @@ app.post('/mcp', mcpRateLimiter, resolveAgentFromBearer, express.json({ limit: '
     { capabilities: { tools: {} } },
   )
 
-  server.setRequestHandler(ListToolsRequestSchema, async () => {
-    return client.listTools()
+  server.setRequestHandler(ListToolsRequestSchema, async (request) => {
+    // S19-ARCH-01b: the discovery surface is now audited like invocations —
+    // claim-provenance recording in tools/list is part of the Tier-3 scope.
+    // No arguments to fingerprint; duration + response size + request id for
+    // correlation; auth path is the resolved authStrength so every protocol
+    // call is attributable.
+    const start = Date.now()
+    let success = true
+    let errorClass: string | null = null
+    let responseBytes: number | null = null
+    try {
+      const result = await client.listTools()
+      responseBytes = JSON.stringify(result ?? {}).length
+      return result
+    } catch (err) {
+      success = false
+      errorClass = err instanceof Error ? err.constructor.name : 'UnknownError'
+      throw err
+    } finally {
+      const requestIdRaw: unknown = (request as unknown as { id?: string | number }).id
+      logToolInvocation(
+        agentSlug,
+        'tools/list',
+        'streamable_http',
+        Date.now() - start,
+        success,
+        errorClass,
+        {
+          sessionId: null,
+          requestId: requestIdRaw !== undefined ? String(requestIdRaw) : null,
+          arguments: null,
+          responseBytes,
+        },
+        { claimedPersona: null, authStrength },
+      )
+    }
   })
 
   // ---------------------------------------------------------------------------
@@ -453,9 +494,6 @@ app.post('/mcp', mcpRateLimiter, resolveAgentFromBearer, express.json({ limit: '
       // SDK type: arguments is object | undefined (never null)
       ...(rawArgs !== null ? { arguments: rawArgs } : {}),
       _meta: buildProvenanceMeta(request.params._meta, { claimedPersona, authStrength }, agentSlug),
-    }
-    if (stepUpNonce !== null) {
-      ;(augmentedParams._meta as Record<string, unknown>)['__stepUpNonce'] = stepUpNonce
     }
 
     // T1-2 + S16-DB-03: log tool invocation (fire-and-forget, enriched)
@@ -617,8 +655,41 @@ app.get('/sse', sseRateLimiter, validateTokenQuery, async (req: Request, res: Re
     { capabilities: { tools: {} } },
   )
 
-  server.setRequestHandler(ListToolsRequestSchema, async () => {
-    return client.listTools()
+  server.setRequestHandler(ListToolsRequestSchema, async (request) => {
+    // S19-ARCH-01b: SSE discovery is audited too — shared_token strength,
+    // bridge actor (identity resolution on /sse is deferred per Silas
+    // ARCH-024 ruling; see the callTool handler note below). Same enrichment
+    // as the /mcp tools/list row: duration + response size + request id.
+    const start = Date.now()
+    let success = true
+    let errorClass: string | null = null
+    let responseBytes: number | null = null
+    try {
+      const result = await client.listTools()
+      responseBytes = JSON.stringify(result ?? {}).length
+      return result
+    } catch (err) {
+      success = false
+      errorClass = err instanceof Error ? err.constructor.name : 'UnknownError'
+      throw err
+    } finally {
+      const requestIdRaw: unknown = (request as unknown as { id?: string | number }).id
+      logToolInvocation(
+        'bridge',
+        'tools/list',
+        'sse',
+        Date.now() - start,
+        success,
+        errorClass,
+        {
+          sessionId: null,
+          requestId: requestIdRaw !== undefined ? String(requestIdRaw) : null,
+          arguments: null,
+          responseBytes,
+        },
+        { claimedPersona: null, authStrength: 'shared_token' },
+      )
+    }
   })
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
