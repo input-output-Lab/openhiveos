@@ -42,6 +42,12 @@ import {
   checkEthosSealGate,
   upsertAgent,
 } from '../auth/upsert-agent.js'
+import {
+  isMacOS,
+  keychainServiceName,
+  readCommand,
+  storeAndVerify,
+} from '../auth/keychain.js'
 
 // ---------------------------------------------------------------------------
 // Help
@@ -59,6 +65,15 @@ Flags:
                 (one line, no surrounding text). All other output goes to
                 stderr. Designed for scripted capture: TOKEN=$(... --token-only).
                 Cannot be combined with --revoke.
+  --keychain    S19-ARCH-01f (#2779): store the minted token in the macOS
+                keychain instead of printing it (credential hygiene — keeps
+                the raw token out of plaintext files/shell history). SPIKE
+                2640 SCOPE: convenience, NOT a security control — any same-
+                user process can read keychain items via the security CLI.
+                The token is stored under service 'openhiveos' (override via
+                OPENHIVE_KEYCHAIN_SERVICE), account = <agent-slug>, with
+                readback verification before success is reported. Rotations
+                overwrite in place. Mutually exclusive with --token-only.
 
 Notes:
   - AGENT_TOKEN is printed to stdout once. Store it immediately.
@@ -79,7 +94,14 @@ if (args.includes('--help') || args.includes('-h')) {
 
 const isRevoke = args.includes('--revoke')
 const isTokenOnly = args.includes('--token-only')
+const isKeychain = args.includes('--keychain')
 const slug = args.find((a) => !a.startsWith('--'))
+
+if (isKeychain && isTokenOnly) {
+  console.error('[provision] Error: --keychain and --token-only are mutually exclusive.')
+  console.error('[provision] --keychain exists so the token never needs to be captured from stdout.')
+  process.exit(1)
+}
 
 if (!slug) {
   console.error('[provision] Error: agent slug is required.')
@@ -94,6 +116,15 @@ if (!isValidAgentSlug(slug)) {
 }
 
 const agent = resolveAgent(slug)
+
+// S19-ARCH-01f: fail early (before minting/rotating anything) if keychain
+// storage was requested on a platform that cannot honor it. Prevents the
+// worst outcome: token rotated, new secret nowhere to go.
+if (isKeychain && !isMacOS()) {
+  console.error('[provision] Error: --keychain requires macOS; this host is ' + process.platform + '.')
+  console.error('[provision] Nothing was rotated — no token was minted.')
+  process.exit(1)
+}
 
 // ---------------------------------------------------------------------------
 // Database connection - provisioning scripts use a dedicated short-lived pool
@@ -146,6 +177,26 @@ try {
       if (!isTokenOnly) {
         console.log(`[provision] Agent "${slug}" already provisioned (no rotation requested).`)
       }
+    } else if (isKeychain) {
+      // S19-ARCH-01f (#2779): token goes to the OS keychain, never to stdout,
+      // shell history, or a plaintext file. Readback-verified before we
+      // report success (the verification reads via the same OS surface a
+      // consumer would use, so success proves the round trip end to end).
+      const ref = { service: keychainServiceName(), account: slug }
+      storeAndVerify(ref, result.token)
+      console.log('[provision] Token stored successfully.')
+      console.log('')
+      console.log('─────────────────────────────────────────────────────────')
+      console.log(`  Agent:      ${slug} (${agent.name})`)
+      console.log(`  Keychain:   service='${ref.service}' account='${ref.account}'`)
+      console.log('─────────────────────────────────────────────────────────')
+      console.log('')
+      console.log('The raw token was NOT printed. Read it back with:')
+      console.log(`  ${readCommand(ref)}`)
+      console.log('')
+      console.log(`SPIKE-2640 reminder: this is hygiene, not security — any process`)
+      console.log(`running as this user can read the item via the security CLI.`)
+      console.log('To rotate, run this script again (overwrites in place).')
     } else if (isTokenOnly) {
       // Machine-readable mode: emit raw token to stdout only.
       // All diagnostic output goes to stderr to keep stdout clean for capture.
